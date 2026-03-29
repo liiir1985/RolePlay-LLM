@@ -11,6 +11,7 @@ from .models import (
 
 class StateManager:
     def __init__(self, main_characters: List[str]):
+        self.main_characters = list(main_characters)
         self.characters: Dict[str, CharacterStatus] = {
             name: CharacterStatus() for name in main_characters
         }
@@ -80,22 +81,25 @@ class StateManager:
             else:
                 items.append(CharacterItem(name=block.item_name, state=block.new_state or ""))
 
+    def get_snapshot(self):
         return {
-            "character_states": {name: status.model_dump() for name, status in self.characters.items()},
-            "character_relationships": {name: [r.model_dump() for r in rels] for name, rels in self.relationships.items()},
-            "character_items": {name: [i.model_dump() for i in items] for name, items in self.items.items()},
+            "character_states": {name: self.characters[name].model_dump() for name in self.main_characters if name in self.characters},
+            "character_relationships": {name: [r.model_dump() for r in self.relationships.get(name, [])] for name in self.main_characters},
+            "character_items": {name: [i.model_dump() for i in self.items.get(name, [])] for name in self.main_characters},
             "known_characters": self.known_characters,
+            "main_characters": self.main_characters,
             "plot_summary": self.plot_summary
         }
 
     def load_checkpoint(self, data: dict):
         # Implementation for resume functionality
+        self.main_characters = data.get("main_characters", self.main_characters)
         if "character_states" in data:
-            self.characters = {k: CharacterStatus.model_validate(v) for k, v in data["character_states"].items()}
+            self.characters.update({k: CharacterStatus.model_validate(v) for k, v in data["character_states"].items()})
         if "character_relationships" in data:
-            self.relationships = {k: [Relationship.model_validate(r) for r in v] for k, v in data["character_relationships"].items()}
+            self.relationships.update({k: [Relationship.model_validate(r) for r in v] for k, v in data["character_relationships"].items()})
         if "character_items" in data:
-            self.items = {k: [CharacterItem.model_validate(i) for i in v] for k, v in data["character_items"].items()}
+            self.items.update({k: [CharacterItem.model_validate(i) for i in v] for k, v in data["character_items"].items()})
         self.known_characters = data.get("known_characters", self.known_characters)
         self.plot_summary = data.get("plot_summary", "")
         self.current_scene = data.get("current_scene", "序章")

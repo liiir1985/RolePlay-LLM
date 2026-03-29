@@ -35,7 +35,7 @@ def load_main_characters(input_dir: Path) -> list:
 def main():
     parser = argparse.ArgumentParser(description="RolePlay-LLM Dataset Preprocessing Tool")
     parser.add_argument("input_dir", help="Directory containing index.json and story.txt")
-    parser.add_argument("--batch_size", type=int, default=200, help="Batch size for LLM processing (default 200)")
+    parser.add_argument("--batch_size", type=int, default=100, help="Batch size for LLM processing (default 200)")
     
     args = parser.parse_args()
     input_dir = Path(args.input_dir)
