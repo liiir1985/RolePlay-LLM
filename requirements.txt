@@ -1,2 +1,6 @@
 # Core Dependencies
 tqdm
+google-genai
+pandas
+pydantic
+python-dotenv
