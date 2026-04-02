@@ -117,8 +117,8 @@ class SceneSummarizer:
                 # Format output exactly as requested
                 new_content = (
                     f"##前情提要\n{self.current_preface}\n\n"
-                    f"#正文\n{body}\n\n"
-                    f"#总结\n{summary}"
+                    f"##正文\n{body}\n\n"
+                    f"##总结\n{summary}"
                 )
                 
                 # Save to the summarized subdirectory
