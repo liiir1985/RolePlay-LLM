@@ -46,15 +46,70 @@ class SceneSummarizer:
             "这个总结将作为下一段的前情提要。\n"
             "仅返回总结内容，不要包含任何引导语、解释或废话。\n"
         )
+
+        system_instruction2 = ("""
+# Role
+# Role
+你是一位极其严谨的 AI 数据工程师。你的任务是对给定的“小说/剧本原始文本”进行**无损的切片手术**，并将其转化为标准的 **OpenAI/ChatML 格式 JSON** 样本。同时，你需要为其注入用于强化学习的“系统设定”和“思维链（CoT）”。
+
+# Core Rules & Constraints (绝对铁律)
+
+### 1. 原文零篡改原则（Zero-Modification）
+- **禁止任何润色、删减或增加**：你提取到 `user` 和 `assistant` 字段中的非 think 文本，拼接起来必须与原始文本**一字不差**（包括所有的标点符号、换行、全半角符号）。
+- 你的工作仅仅是**“划分归属权”**，绝不允许替原作者改写哪怕一个字。
+- 你需要编辑的内容为正文部分的内容，前情提要用来生成系统提示词
+- **划分界限**：
+  - `user` 角色：**仅**包含【用户扮演角色】直接产生的文字（该角色的对话、该角色的心理活动、明确主语是该角色的动作）。
+  - `assistant` 角色：包含**所有剩余内容**（上帝视角的旁白叙事、环境描写、其他配角的戏份、以及【AI重点扮演角色】的言行和心理）。
+
+### 2. System Prompt 沉浸原则
+- `system` 角色的内容是给**最终训练出的 AI** 看的。
+- **绝对禁止**在 `system` 中出现诸如“user角色包含什么”、“你需要切分文本”、“输出JSON”这类数据处理和切分指令。
+- `system` 必须是一段沉浸式的设定声明，包含：职责定位（DM兼NPC）、双方扮演身份、世界观隐性规则，以及要求开启 think 标签的设定。
+- 系统提示词需要考虑前情提要的内容并体现其内容，但是系统提示词中不应该包含正文部分的情节。
+
+### 3. 思维链 (CoT) 自由发散原则
+- 只能在 `assistant` 角色的 `content` 原文内容**之前**，插入一段由你原创的 `<think>...</think>`。
+- **思考内容要求**：你需要以 DM 和该角色的双重身份，推演**为什么会发生接下来的原文情节**。思考维度可自由发散（如：玩家行为触发了哪条规则？当前场景的氛围该如何转场？角色的表层动作掩盖了怎样的深层心理？）。思考内容需要至少200字
+
+# Output Format
+你必须输出合法的纯 JSON 代码，格式严格如下：
+
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "[Thought: Medium]..."
+    },
+    {
+      "role": "user",
+      "content": "【严格照抄原文中属于用户的片段】"
+    },
+    {
+      "role": "assistant",
+      "content": "<think>\n【由你原创：发散性的逻辑推演与心理分析】\n</think>\n【严格照抄原文中接续的旁白、配角或核心角色的片段】"
+    }
+    // 根据原文交互顺序，继续无损交替切割
+  ]
+}
+
+---
+# Input Data
+
+- **【用户/Human】扮演的角色**：桐崎冬马
+- **【大模型/AI】重点扮演的核心角色**：九条桃华
+            """
+        )
         
-        prompt = f"## 前情提要\n{preface if preface else '（无）'}\n\n# 当前正文\n{body}"
+        #prompt = f"## 前情提要\n{preface if preface else '（无）'}\n\n# 当前正文\n{body}"
+        prompt = f"# 当前正文\n{body}"
         
         try:
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
+                    system_instruction=system_instruction2,
                     temperature=0.7,
                 ),
             )
