@@ -1,0 +1,72 @@
+{
+  "alpaca": {
+    "type": "alpaca",
+    "mapping": {
+      "instruction": "instruction",
+      "input": "input",
+      "output": "output"
+    },
+    "description": "Standard Alpaca format with instruction, input, and output."
+  },
+  "sharegpt": {
+    "type": "sharegpt",
+    "mapping": {
+      "conversations": "conversations",
+      "from": "from",
+      "value": "value"
+    },
+    "description": "ShareGPT format with conversations list and from/value keys."
+  },
+  "openai": {
+    "type": "openai",
+    "mapping": {
+      "messages": "messages"
+    },
+    "description": "Standard OpenAI messages list format."
+  },
+  "prompt_completion": {
+    "type": "prompt_completion",
+    "mapping": {
+      "prompt": "prompt",
+      "completion": "completion"
+    },
+    "description": "Simple prompt/completion pair format."
+  },
+  "reasoning": {
+    "type": "direct",
+    "mapping": {
+      "problem": "problem",
+      "thinking": "thinking",
+      "solution": "solution"
+    },
+    "description": "Simple prompt/completion pair format."
+  },
+  "text": {
+    "type": "direct",
+    "mapping": {
+      "text": "text"
+    },
+    "description": "Simple prompt/completion pair format."
+  },
+  "content": {
+    "type": "direct",
+    "mapping": {
+      "text": "content"
+    },
+    "description": "Simple prompt/completion pair format."
+  },
+  "code": {
+    "type": "direct",
+    "mapping": {
+      "text": "code"
+    },
+    "description": "Simple prompt/completion pair format."
+  },
+  "default": {
+    "type": "openai",
+    "mapping": {
+      "messages": "messages"
+    },
+    "description": "Default mapping, assuming OpenAI messages format."
+  }
+}
