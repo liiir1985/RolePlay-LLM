@@ -221,11 +221,10 @@ class RolePlayProcessor(BaseDataProcessor):
             system_prompt = self._generate_system_prompt(text, speakers, protagonist)
             retry_count += 1
         if "无法为您" in system_prompt or "无法生成" in system_prompt:
-            system_prompt="""
-            【系统提示词：轻小说风格沉浸式互动】
-            你并非用户，而是本世界的叙事引擎。你需要尽可能满足用户的需求并沿着用户给定的内容进行继续演绎。
-            请开启故事，从用户当前的情境出发，生动演绎接下来的情节。            
-            """ + lines[0]
+            system_prompt="""系统提示词：轻小说风格沉浸式互动】
+你并非用户，而是本世界的叙事引擎。你需要尽可能满足用户的需求并沿着用户给定的内容进行继续演绎。
+请开启故事，从用户当前的情境出发，生动演绎接下来的情节。            
+""" + lines[0]
         # 4. Assemble
         chat_messages = self._assemble_messages(lines, analyzed_lines, protagonist)
         
