@@ -17,10 +17,12 @@ from tqdm import tqdm
 try:
     # Try relative import first
     from .chatml_processor import ChatMLProcessor, SystemPromptGenerator
+    from .roleplay_processor import RolePlayProcessor
 except ImportError:
     # Fallback to absolute or direct import if run as a script
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     from chatml_processor import ChatMLProcessor, SystemPromptGenerator
+    from roleplay_processor import RolePlayProcessor
 
 # Configure logging
 logging.basicConfig(
@@ -69,6 +71,13 @@ def main():
         type=str,
         default="[2398, 3724, 2356, 2419, 4076, 3618, 3123, 2025, 2237, 3126, 3946, 4423, 3247, 4060, 3037, 4325, 2071, 4211, 3006, 3223, 4208, 3968, 2461, 2477, 2228, 3455, 2440, 4043, 2211, 4115,2139, 3176, 4503, 4469, 2198, 4223, 2403, 4069, 3579, 2264, 3716, 4436, 4461, 4454, 3723, 3949, 2005, 3496, 4455, 3886, 3029, 4309, 3958, 3068, 3758, 4360, 3571, 3079, 2349, 4329]",
         help="JSON array of strings/numbers that filenames must contain, in processing order."
+    )
+    parser.add_argument(
+        "--processor",
+        type=str,
+        choices=["chatml", "roleplay"],
+        default="roleplay",
+        help="The data processor to use (chatml or roleplay)"
     )
 
     args = parser.parse_args()
@@ -127,12 +136,19 @@ def main():
     logger.info(f"Filtered to {len(jsonl_files)} files with {total_entries} total entries. Initializing generator and processor...")
     
     # Initialize the specific processor implementation
-    generator = SystemPromptGenerator(
-        base_url=args.base_url, 
-        model_name=args.model,
-        api_key=args.api_key
-    )
-    processor = ChatMLProcessor(generator)
+    if args.processor == "roleplay":
+        processor = RolePlayProcessor(
+            base_url=args.base_url,
+            model_name=args.model,
+            api_key=args.api_key
+        )
+    else:
+        generator = SystemPromptGenerator(
+            base_url=args.base_url, 
+            model_name=args.model,
+            api_key=args.api_key
+        )
+        processor = ChatMLProcessor(generator)
 
     with tqdm(total=total_entries, desc="Processing entries") as pbar:
         try:

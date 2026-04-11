@@ -3,7 +3,7 @@ import logging
 import re
 from typing import Dict, Optional
 from openai import OpenAI
-from .base_processor import BaseDataProcessor
+from src.data_preparation.base_processor import BaseDataProcessor
 
 logger = logging.getLogger(__name__)
 
