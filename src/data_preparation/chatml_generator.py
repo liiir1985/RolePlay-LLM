@@ -9,6 +9,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import sys
 from pathlib import Path
 from tqdm import tqdm
@@ -78,6 +79,12 @@ def main():
         choices=["chatml", "roleplay"],
         default="roleplay",
         help="The data processor to use (chatml or roleplay)"
+    )
+    parser.add_argument(
+        "--random-n",
+        type=int,
+        default=None,
+        help="Randomly sample N entries across all filtered files for processing."
     )
 
     args = parser.parse_args()
@@ -150,6 +157,61 @@ def main():
         )
         processor = ChatMLProcessor(generator)
 
+    if args.random_n is not None:
+        logger.info(f"Sampling {args.random_n} random entries...")
+        all_entries = []
+        for file_path in jsonl_files:
+            num_lines = count_file_lines(file_path)
+            for i in range(num_lines):
+                all_entries.append((file_path, i))
+        
+        sampled_entries = random.sample(all_entries, min(len(all_entries), args.random_n))
+        # Sort by file path then line index to optimize sequential reading
+        sampled_entries.sort()
+        
+        output_file = output_path / "sampled_output.jsonl"
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Processing {len(sampled_entries)} sampled entries to {output_file}...")
+        
+        with tqdm(total=len(sampled_entries), desc="Sampling entries") as pbar:
+            current_file = None
+            f_in = None
+            try:
+                with open(output_file, "w", encoding="utf-8") as f_out:
+                    for file_path, line_idx in sampled_entries:
+                        if file_path != current_file:
+                            if f_in:
+                                f_in.close()
+                            current_file = file_path
+                            f_in = open(file_path, "r", encoding="utf-8")
+                            last_idx = -1
+                        
+                        # Move to the desired line
+                        # Since sampled_entries is sorted by line_idx, we can just continue calling next()
+                        for _ in range(line_idx - last_idx):
+                            line = f_in.readline()
+                        last_idx = line_idx
+                        
+                        if line:
+                            try:
+                                data = json.loads(line.strip())
+                                processed_data = processor.process(data)
+                                if processed_data:
+                                    f_out.write(json.dumps(processed_data, ensure_ascii=False) + "\n")
+                                    f_out.flush()
+                            except Exception as e:
+                                logger.error(f"Error processing sampled line in {file_path}: {e}")
+                        
+                        pbar.update(1)
+            finally:
+                if f_in:
+                    f_in.close()
+        
+        logger.info(f"Sampled processing complete. Results saved to {output_file}")
+        return
+
+    # Original sequential processing loop
     with tqdm(total=total_entries, desc="Processing entries") as pbar:
         try:
             for file_path in jsonl_files:
