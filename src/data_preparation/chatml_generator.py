@@ -166,6 +166,12 @@ def main():
         default="sk-no-key",
         help="API key for the OpenAI-compatible service"
     )
+    parser.add_argument(
+        "--include-keywords",
+        type=str,
+        default="[2398, 3724, 2356, 2419, 4076, 3618, 3123, 2025, 2237, 3126, 3946, 4423, 3247, 4060, 3037, 4325, 2071, 4211, 3006, 3223, 4208, 3968, 2461, 2477, 2228, 3455, 2440, 4043, 2211, 4115,2139, 3176, 4503, 4469, 2198, 4223, 2403, 4069, 3579, 2264, 3716, 4436, 4461, 4454, 3723, 3949, 2005, 3496, 4455, 3886, 3029, 4309, 3958, 3068, 3758, 4360, 3571, 3079, 2349, 4329]",
+        help="JSON array of strings/numbers that filenames must contain, in processing order."
+    )
 
     args = parser.parse_args()
 
@@ -177,16 +183,50 @@ def main():
         sys.exit(1)
 
     # Find all .jsonl files recursively
-    jsonl_files = list(input_path.glob("**/*.jsonl"))
-    if not jsonl_files:
+    all_jsonl_files = list(input_path.glob("**/*.jsonl"))
+    if not all_jsonl_files:
         logger.warning(f"No .jsonl files found in {args.input_dir}")
         return
+
+    # Parse keywords
+    try:
+        keywords = json.loads(args.include_keywords)
+        if not isinstance(keywords, list):
+            logger.error("--include-keywords must be a JSON array")
+            sys.exit(1)
+        # Convert all keywords to strings for matching
+        keywords = [str(k) for k in keywords]
+    except json.JSONDecodeError:
+        logger.error(f"Failed to parse --include-keywords as JSON: {args.include_keywords}")
+        sys.exit(1)
+
+    # Filter and sort files based on keywords
+    jsonl_files = []
+    seen_files = set()
+    
+    if keywords:
+        logger.info(f"Filtering files based on {len(keywords)} keywords in order...")
+        for kw in keywords:
+            # Find files containing this keyword in their name
+            matching_files = [f for f in all_jsonl_files if kw in f.name and f not in seen_files]
+            # Optional: sort matching files for this specific keyword alphabetically
+            matching_files.sort(key=lambda x: x.name)
+            
+            for f in matching_files:
+                jsonl_files.append(f)
+                seen_files.add(f)
+        
+        if not jsonl_files:
+            logger.warning("No files matched any of the provided keywords.")
+            return
+    else:
+        jsonl_files = all_jsonl_files
 
     # Count total entries for progress bar
     logger.info("Counting total entries across all files...")
     total_entries = sum(count_file_lines(f) for f in jsonl_files)
     
-    logger.info(f"Found {len(jsonl_files)} files with {total_entries} total entries. Initializing generator...")
+    logger.info(f"Filtered to {len(jsonl_files)} files with {total_entries} total entries. Initializing generator...")
     generator = SystemPromptGenerator(
         base_url=args.base_url, 
         model_name=args.model,
