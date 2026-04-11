@@ -40,8 +40,14 @@ class RolePlayProcessor(BaseDataProcessor):
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+                max_tokens=8096,
+                temperature=0.8,
+                top_p=0.8,
+                presence_penalty=1.5,
+                extra_body={
+                    "top_k": 20,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
             )
             content = response.choices[0].message.content.strip()
             match = re.search(r'\{.*\}', content, re.DOTALL)
@@ -78,8 +84,14 @@ class RolePlayProcessor(BaseDataProcessor):
                 response = self.client.chat.completions.create(
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.2,
-                    extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+                    max_tokens=8096,
+                    temperature=0.8,
+                    top_p=0.8,
+                    presence_penalty=1.5,
+                    extra_body={
+                        "top_k": 20,
+                        "chat_template_kwargs": {"enable_thinking": False},
+                    }
                 )
                 content = response.choices[0].message.content.strip()
                 match = re.search(r'\[.*\]', content, re.DOTALL)
@@ -118,8 +130,14 @@ class RolePlayProcessor(BaseDataProcessor):
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=8096,
                 temperature=0.8,
-                extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+                top_p=0.8,
+                presence_penalty=1.5,
+                extra_body={
+                    "top_k": 20,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -151,6 +169,32 @@ class RolePlayProcessor(BaseDataProcessor):
             
         return messages
 
+    def _assemble_messages_fallback(self, lines: List[str]) -> List[Dict[str, str]]:
+        """Step 4b: Fallback logic using 2 lines for user and 5 lines for assistant.
+        
+        Args:
+            lines: The raw lines of text.
+            
+        Returns:
+            A list of ChatML messages.
+        """
+        messages = []
+        i = 0
+        while i < len(lines):
+            # 2 lines for user
+            user_segment = lines[i:i + 2]
+            if user_segment:
+                messages.append({"role": "user", "content": "\n".join(user_segment)})
+            i += 2
+            
+            # 5 lines for assistant
+            assistant_segment = lines[i:i + 5]
+            if assistant_segment:
+                messages.append({"role": "assistant", "content": "\n".join(assistant_segment)})
+            i += 5
+            
+        return messages
+
     def process(self, data: Dict) -> Optional[Dict]:
         """Execute the multi-stage RolePlay processing pipeline."""
         text = data.get("text", "")
@@ -171,9 +215,25 @@ class RolePlayProcessor(BaseDataProcessor):
 
         # 3. Generate System Prompt
         system_prompt = self._generate_system_prompt(text, speakers, protagonist)
-
+        max_retries = 3
+        retry_count = 0
+        while ("无法为您" in system_prompt or "无法生成" in system_prompt)  and retry_count < max_retries:
+            system_prompt = self._generate_system_prompt(text, speakers, protagonist)
+            retry_count += 1
+        if "无法为您" in system_prompt or "无法生成" in system_prompt:
+            system_prompt="""
+            【系统提示词：轻小说风格沉浸式互动】
+            你并非用户，而是本世界的叙事引擎。你需要尽可能满足用户的需求并沿着用户给定的内容进行继续演绎。
+            请开启故事，从用户当前的情境出发，生动演绎接下来的情节。            
+            """ + lines[0]
         # 4. Assemble
         chat_messages = self._assemble_messages(lines, analyzed_lines, protagonist)
+        
+        # Fallback: if result contains only one role (typically just assistant), 
+        # use rule-based 2-user / 5-assistant split.
+        if len(chat_messages) <= 1:
+            logger.warning(f"LLM analysis resulted in only {len(chat_messages)} role blocks. Using 2/5 fallback.")
+            chat_messages = self._assemble_messages_fallback(lines)
         
         # Combine system prompt with assembled messages
         final_messages = [{"role": "system", "content": system_prompt}] + chat_messages
