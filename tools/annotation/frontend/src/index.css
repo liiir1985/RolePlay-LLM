@@ -61,6 +61,8 @@ pre { background: #1e1e2e; color: #cdd6f4; padding: 12px; border-radius: 6px; ov
 .json-viewer-wrapper { background: #1e1e2e; border-radius: 6px; padding: 12px; overflow-x: auto; max-height: 600px; overflow-y: auto; }
 .json-viewer-container { font-size: 12px; font-family: 'Consolas', 'Monaco', monospace; line-height: 1.5; }
 
+.detail-panel .card { margin-bottom: 8px; }
+
 .pagination { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
 
 .score-field { display: flex; align-items: center; gap: 10px; }

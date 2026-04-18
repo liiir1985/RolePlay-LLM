@@ -119,4 +119,84 @@ export const api = {
       return read()
     })
   },
+  fixJsonStringsStream: (onEvent: (data: any) => void) => {
+    return fetch(BASE + '/cleaning/fix-json-strings', { method: 'POST' }).then(res => {
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const read = (): Promise<void> => reader.read().then(({ done, value }) => {
+        if (done) return
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try { onEvent(JSON.parse(line.slice(6))) } catch {}
+          }
+        }
+        return read()
+      })
+      return read()
+    })
+  },
+  mergeConsecutiveSystemStream: (onEvent: (data: any) => void) => {
+    return fetch(BASE + '/cleaning/merge-consecutive-system', { method: 'POST' }).then(res => {
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const read = (): Promise<void> => reader.read().then(({ done, value }) => {
+        if (done) return
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try { onEvent(JSON.parse(line.slice(6))) } catch {}
+          }
+        }
+        return read()
+      })
+      return read()
+    })
+  },
+  dedupSystemMessagesStream: (onEvent: (data: any) => void) => {
+    return fetch(BASE + '/cleaning/dedup-system-messages', { method: 'POST' }).then(res => {
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const read = (): Promise<void> => reader.read().then(({ done, value }) => {
+        if (done) return
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try { onEvent(JSON.parse(line.slice(6))) } catch {}
+          }
+        }
+        return read()
+      })
+      return read()
+    })
+  },
+  removeEmptyRecordsStream: (onEvent: (data: any) => void) => {
+    return fetch(BASE + '/cleaning/remove-empty-records', { method: 'POST' }).then(res => {
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const read = (): Promise<void> => reader.read().then(({ done, value }) => {
+        if (done) return
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try { onEvent(JSON.parse(line.slice(6))) } catch {}
+          }
+        }
+        return read()
+      })
+      return read()
+    })
+  },
 }

@@ -33,6 +33,10 @@ export default function Cleaning() {
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [result, setResult] = useState<{ merged: number; deleted: number } | null>(null)
+  const [fixResult, setFixResult] = useState<{ fixed: number; total: number } | null>(null)
+  const [removeResult, setRemoveResult] = useState<{ deleted: number; total: number } | null>(null)
+  const [dedupResult, setDedupResult] = useState<{ modified: number; messages_removed: number; total: number } | null>(null)
+  const [mergeConsResult, setMergeConsResult] = useState<{ modified: number; messages_merged: number; total: number } | null>(null)
   const [error, setError] = useState('')
 
   const scan = async () => {
@@ -90,6 +94,98 @@ export default function Cleaning() {
           setResult(event.result)
           setPreview(null)
           setSelected(new Set())
+          setProgress(p => ({ ...p, active: false }))
+        } else if (event.stage === 'error') {
+          setError(event.message)
+          setProgress(p => ({ ...p, active: false }))
+        } else {
+          setProgress({ active: true, stage: event.stage, message: event.message, progress: event.progress || 0, total: event.total || 0 })
+        }
+      })
+    } catch (e: any) {
+      setError(e.message || '执行失败')
+      setProgress(p => ({ ...p, active: false }))
+    }
+  }
+
+  const fixJsonStrings = async () => {
+    if (!confirm('将扫描所有记录，把 input/output 中字符串形式的 JSON 字段替换为 JSON 对象。确认执行？')) return
+    setError('')
+    setFixResult(null)
+    setProgress({ active: true, stage: 'processing', message: '正在处理...', progress: 0, total: 0 })
+    try {
+      await api.fixJsonStringsStream((event) => {
+        if (event.stage === 'done') {
+          setFixResult(event.result)
+          setProgress(p => ({ ...p, active: false }))
+        } else if (event.stage === 'error') {
+          setError(event.message)
+          setProgress(p => ({ ...p, active: false }))
+        } else {
+          setProgress({ active: true, stage: event.stage, message: event.message, progress: event.progress || 0, total: event.total || 0 })
+        }
+      })
+    } catch (e: any) {
+      setError(e.message || '执行失败')
+      setProgress(p => ({ ...p, active: false }))
+    }
+  }
+
+  const removeEmptyRecords = async () => {
+    if (!confirm('将删除所有没有 assistant 有效发言且 output 为空的记录。确认执行？')) return
+    setError('')
+    setRemoveResult(null)
+    setProgress({ active: true, stage: 'processing', message: '正在扫描...', progress: 0, total: 0 })
+    try {
+      await api.removeEmptyRecordsStream((event) => {
+        if (event.stage === 'done') {
+          setRemoveResult(event.result)
+          setProgress(p => ({ ...p, active: false }))
+        } else if (event.stage === 'error') {
+          setError(event.message)
+          setProgress(p => ({ ...p, active: false }))
+        } else {
+          setProgress({ active: true, stage: event.stage, message: event.message, progress: event.progress || 0, total: event.total || 0 })
+        }
+      })
+    } catch (e: any) {
+      setError(e.message || '执行失败')
+      setProgress(p => ({ ...p, active: false }))
+    }
+  }
+
+  const dedupSystemMessages = async () => {
+    if (!confirm('将扫描所有记录，去除 system message 中与更早 system message 重复的子串。确认执行？')) return
+    setError('')
+    setDedupResult(null)
+    setProgress({ active: true, stage: 'processing', message: '正在扫描...', progress: 0, total: 0 })
+    try {
+      await api.dedupSystemMessagesStream((event) => {
+        if (event.stage === 'done') {
+          setDedupResult(event.result)
+          setProgress(p => ({ ...p, active: false }))
+        } else if (event.stage === 'error') {
+          setError(event.message)
+          setProgress(p => ({ ...p, active: false }))
+        } else {
+          setProgress({ active: true, stage: event.stage, message: event.message, progress: event.progress || 0, total: event.total || 0 })
+        }
+      })
+    } catch (e: any) {
+      setError(e.message || '执行失败')
+      setProgress(p => ({ ...p, active: false }))
+    }
+  }
+
+  const mergeConsecutiveSystem = async () => {
+    if (!confirm('将扫描所有记录，合并连续的 system messages 为一条。确认执行？')) return
+    setError('')
+    setMergeConsResult(null)
+    setProgress({ active: true, stage: 'processing', message: '正在扫描...', progress: 0, total: 0 })
+    try {
+      await api.mergeConsecutiveSystemStream((event) => {
+        if (event.stage === 'done') {
+          setMergeConsResult(event.result)
           setProgress(p => ({ ...p, active: false }))
         } else if (event.stage === 'error') {
           setError(event.message)
@@ -192,10 +288,80 @@ export default function Cleaning() {
         )}
       </div>
 
+      <div className="card">
+        <div className="flex" style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600 }}>修复 JSON 字符串字段</h3>
+          <button className="btn-primary" onClick={fixJsonStrings} disabled={progress.active} style={{ marginLeft: 'auto' }}>
+            执行
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+          扫描所有记录的 input/output，将其中字符串形式的 JSON 字段（如 <code>{'{"key":"val"}'}</code>）替换为真正的 JSON 对象。
+        </p>
+        {fixResult && (
+          <div style={{ background: '#d1fae5', color: '#065f46', padding: 12, borderRadius: 6 }}>
+            完成：共处理 {fixResult.total} 条记录，修复了 {fixResult.fixed} 条。
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="flex" style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600 }}>删除空记录</h3>
+          <button className="btn-primary" onClick={removeEmptyRecords} disabled={progress.active} style={{ marginLeft: 'auto' }}>
+            执行
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+          删除 input 中没有 assistant 有效发言且 output 为空（content/tool_calls/function_call 均为空）的记录。
+        </p>
+        {removeResult && (
+          <div style={{ background: '#d1fae5', color: '#065f46', padding: 12, borderRadius: 6 }}>
+            完成：共扫描 {removeResult.total} 条记录，删除了 {removeResult.deleted} 条。
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="flex" style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600 }}>合并连续 System Message</h3>
+          <button className="btn-primary" onClick={mergeConsecutiveSystem} disabled={progress.active} style={{ marginLeft: 'auto' }}>
+            执行
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+          将同一条记录中连续的多个 system message 合并为一条，内容以换行拼接。
+        </p>
+        {mergeConsResult && (
+          <div style={{ background: '#d1fae5', color: '#065f46', padding: 12, borderRadius: 6 }}>
+            完成：共扫描 {mergeConsResult.total} 条记录，修改了 {mergeConsResult.modified} 条，合并了 {mergeConsResult.messages_merged} 条 message。
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="flex" style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600 }}>去除重复 System Message</h3>
+          <button className="btn-primary" onClick={dedupSystemMessages} disabled={progress.active} style={{ marginLeft: 'auto' }}>
+            执行
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+          从后往前比对 system messages，删除与更早 system message 中超过10字的重复子串。如果删除后内容为空则移除该条 message。
+        </p>
+        {dedupResult && (
+          <div style={{ background: '#d1fae5', color: '#065f46', padding: 12, borderRadius: 6 }}>
+            完成：共扫描 {dedupResult.total} 条记录，修改了 {dedupResult.modified} 条，移除了 {dedupResult.messages_removed} 条空 message。
+          </div>
+        )}
+      </div>
+
       {progress.active && (
         <div className="modal-overlay">
           <div className="modal" style={{ minWidth: 400, maxWidth: 480, textAlign: 'center' }}>
-            <h2 style={{ marginBottom: 16 }}>{progress.stage === 'merging' ? '正在合并' : '正在扫描'}</h2>
+            <h2 style={{ marginBottom: 16 }}>
+              {progress.stage === 'merging' ? '正在合并' : progress.stage === 'deleting' ? '正在删除' : progress.stage === 'updating' ? '正在更新' : progress.stage === 'processing' ? '正在处理' : '正在扫描'}
+            </h2>
             <p style={{ fontSize: 13, color: '#555', marginBottom: 16 }}>{progress.message}</p>
             <div style={{ background: '#e5e7eb', borderRadius: 4, height: 20, overflow: 'hidden', marginBottom: 8 }}>
               <div style={{

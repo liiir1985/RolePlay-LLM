@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from difflib import SequenceMatcher
 from fastapi import APIRouter
@@ -46,15 +47,18 @@ def find_tool_use_ids_in_content(content) -> list:
 
 
 def text_similarity(a: str, b: str) -> float:
+    """Return how much of the shorter text is contained in the longer one."""
     if not a:
         return 1.0
     if not b:
         return 0.0
-    if len(a) > 5000 or len(b) > 5000:
-        a_sample = a[:2000] + a[-2000:] if len(a) > 4000 else a
-        b_sample = b[:2000] + b[-2000:] if len(b) > 4000 else b
-        return SequenceMatcher(None, a_sample, b_sample).ratio()
-    return SequenceMatcher(None, a, b).ratio()
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    if len(shorter) > 5000:
+        shorter = shorter[:2000] + shorter[-2000:]
+        longer = longer[:2000] + longer[-2000:]
+    sm = SequenceMatcher(None, shorter, longer)
+    matching = sum(block.size for block in sm.get_matching_blocks())
+    return matching / len(shorter) if shorter else 0.0
 
 
 def parse_record(row) -> Optional[dict]:
@@ -115,10 +119,6 @@ def check_output_in_messages(a_output: dict, b_messages: list) -> bool:
             sim = text_similarity(a_text, b_text)
             if sim >= 0.9:
                 return True
-            if len(a_text) > len(b_text):
-                sim2 = text_similarity(b_text, a_text)
-                if sim2 >= 0.9:
-                    return True
 
     return False
 
@@ -432,5 +432,365 @@ def merge_execute(body: MergeExecuteIn):
                 yield f"data: {json.dumps({'stage': 'merging', 'progress': ci + 1, 'total': total, 'message': f'合并中 {ci+1}/{total}'})}\n\n"
 
         yield f"data: {json.dumps({'stage': 'done', 'result': {'merged': merged_count, 'deleted': deleted_count}})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+
+
+@router.post("/fix-json-strings")
+def fix_json_strings():
+    def generate():
+        with get_conn() as conn:
+            rows = conn.execute("SELECT id, input, output FROM records").fetchall()
+
+        total = len(rows)
+        yield f"data: {json.dumps({'stage': 'processing', 'progress': 0, 'total': total, 'message': f'共 {total} 条记录'})}\n\n"
+
+        fixed = 0
+        with get_conn() as conn:
+            for i, row in enumerate(rows):
+                new_input = row["input"]
+                new_output = row["output"]
+                changed = False
+
+                for field, val in (("input", row["input"]), ("output", row["output"])):
+                    if not isinstance(val, str):
+                        continue
+
+                    # Strip ANSI escape sequences
+                    cleaned = _ANSI_RE.sub('', val)
+                    if cleaned != val:
+                        changed = True
+                        val = cleaned
+
+                    # Unwrap double-encoded JSON (json.loads -> str -> json.loads)
+                    try:
+                        parsed = json.loads(val, strict=False)
+                        if isinstance(parsed, str):
+                            try:
+                                inner = json.loads(parsed, strict=False)
+                                if isinstance(inner, (dict, list)):
+                                    val = json.dumps(inner, ensure_ascii=False)
+                                    changed = True
+                            except (json.JSONDecodeError, ValueError):
+                                pass
+                        elif cleaned != row[field]:
+                            val = json.dumps(parsed, ensure_ascii=False)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+                    if field == "input":
+                        new_input = val
+                    else:
+                        new_output = val
+
+                if changed:
+                    conn.execute(
+                        "UPDATE records SET input=?, output=? WHERE id=?",
+                        (new_input, new_output, row["id"]),
+                    )
+                    fixed += 1
+
+                if (i + 1) % 200 == 0 or i == total - 1:
+                    conn.commit()
+                    yield f"data: {json.dumps({'stage': 'processing', 'progress': i + 1, 'total': total, 'message': f'处理中 {i+1}/{total}'})}\n\n"
+
+        yield f"data: {json.dumps({'stage': 'done', 'result': {'fixed': fixed, 'total': total}})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _is_output_empty(output_str: str | None) -> bool:
+    if not output_str:
+        return True
+    try:
+        out = json.loads(output_str, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        return not output_str.strip()
+    if out is None:
+        return True
+    if isinstance(out, str):
+        return not out.strip()
+    if isinstance(out, dict):
+        content = out.get("content")
+        tool_calls = out.get("tool_calls")
+        function_call = out.get("function_call")
+        has_content = content and (content if isinstance(content, str) else any(
+            b.get("text") or b.get("content") for b in content if isinstance(b, dict)
+        ))
+        has_tool = tool_calls and len(tool_calls) > 0
+        has_func = function_call and isinstance(function_call, dict) and function_call.get("name")
+        return not (has_content or has_tool or has_func)
+    return False
+
+
+def _has_assistant_content(input_str: str | None) -> bool:
+    if not input_str:
+        return False
+    try:
+        inp = json.loads(input_str, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(inp, dict):
+        return False
+    messages = inp.get("messages", [])
+    if not isinstance(messages, list):
+        return False
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if content is None or content == "":
+            continue
+        if isinstance(content, str) and content.strip():
+            return True
+        if isinstance(content, list) and any(
+            (b.get("text") or "").strip() or b.get("type") == "tool_use"
+            for b in content if isinstance(b, dict)
+        ):
+            return True
+    return False
+
+
+@router.post("/remove-empty-records")
+def remove_empty_records():
+    def generate():
+        with get_conn() as conn:
+            rows = conn.execute("SELECT id, input, output FROM records").fetchall()
+
+        total = len(rows)
+        yield f"data: {json.dumps({'stage': 'processing', 'progress': 0, 'total': total, 'message': f'共 {total} 条记录'})}\n\n"
+
+        to_delete = []
+        for i, row in enumerate(rows):
+            if not _has_assistant_content(row["input"]) and _is_output_empty(row["output"]):
+                to_delete.append(row["id"])
+            if (i + 1) % 200 == 0 or i == total - 1:
+                yield f"data: {json.dumps({'stage': 'processing', 'progress': i + 1, 'total': total, 'message': f'扫描中 {i+1}/{total}，待删除 {len(to_delete)}'})}\n\n"
+
+        if not to_delete:
+            yield f"data: {json.dumps({'stage': 'done', 'result': {'deleted': 0, 'total': total}})}\n\n"
+            return
+
+        with get_conn() as conn:
+            batch_size = 100
+            for start in range(0, len(to_delete), batch_size):
+                batch = to_delete[start:start + batch_size]
+                placeholders = ",".join("?" * len(batch))
+                conn.execute(f"DELETE FROM queue_items WHERE record_id IN ({placeholders})", batch)
+                conn.execute(f"DELETE FROM dataset_items WHERE record_id IN ({placeholders})", batch)
+                conn.execute(f"DELETE FROM records WHERE id IN ({placeholders})", batch)
+                conn.commit()
+                yield f"data: {json.dumps({'stage': 'deleting', 'progress': min(start + batch_size, len(to_delete)), 'total': len(to_delete), 'message': f'删除中 {min(start + batch_size, len(to_delete))}/{len(to_delete)}'})}\n\n"
+
+        yield f"data: {json.dumps({'stage': 'done', 'result': {'deleted': len(to_delete), 'total': total}})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _merge_intervals(intervals):
+    if not intervals:
+        return []
+    intervals.sort()
+    merged = [intervals[0]]
+    for start, end in intervals[1:]:
+        if start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _find_repeated_intervals(text, reference_texts, min_len=10):
+    intervals = []
+    for ref in reference_texts:
+        sm = SequenceMatcher(None, text, ref, autojunk=False)
+        for block in sm.get_matching_blocks():
+            if block.size >= min_len:
+                intervals.append((block.a, block.a + block.size))
+    return _merge_intervals(intervals)
+
+
+def _remove_intervals(text, intervals):
+    if not intervals:
+        return text
+    parts = []
+    prev_end = 0
+    for start, end in intervals:
+        parts.append(text[prev_end:start])
+        prev_end = end
+    parts.append(text[prev_end:])
+    return "".join(parts)
+
+
+def _dedup_system_messages(messages):
+    system_items = []
+    for i, m in enumerate(messages):
+        if m.get("role") == "system":
+            system_items.append((i, extract_text(m.get("content"))))
+
+    to_update = {}
+    to_remove = set()
+
+    for idx in range(len(system_items) - 1, -1, -1):
+        pos, text = system_items[idx]
+        if not text or len(text) < 10:
+            continue
+        earlier_texts = [t for _, t in system_items[:idx]]
+        if not earlier_texts:
+            continue
+        intervals = _find_repeated_intervals(text, earlier_texts, min_len=10)
+        if intervals:
+            new_text = _remove_intervals(text, intervals).strip()
+            if not new_text:
+                to_remove.add(pos)
+            else:
+                to_update[pos] = new_text
+
+    if not to_update and not to_remove:
+        return messages, False
+
+    new_messages = []
+    for i, m in enumerate(messages):
+        if i in to_remove:
+            continue
+        if i in to_update:
+            m = dict(m)
+            m["content"] = to_update[i]
+        new_messages.append(m)
+    return new_messages, True
+
+
+@router.post("/dedup-system-messages")
+def dedup_system_messages():
+    def generate():
+        with get_conn() as conn:
+            rows = conn.execute("SELECT id, input FROM records").fetchall()
+
+        total = len(rows)
+        yield f"data: {json.dumps({'stage': 'processing', 'progress': 0, 'total': total, 'message': f'共 {total} 条记录'})}\n\n"
+
+        modified_count = 0
+        messages_removed = 0
+        updates = []
+
+        for i, row in enumerate(rows):
+            try:
+                inp = json.loads(row["input"]) if row["input"] else {}
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(inp, dict):
+                continue
+            messages = inp.get("messages", [])
+            if not messages:
+                continue
+
+            new_messages, changed = _dedup_system_messages(messages)
+            if changed:
+                removed = len(messages) - len(new_messages)
+                messages_removed += removed
+                modified_count += 1
+                inp["messages"] = new_messages
+                updates.append((json.dumps(inp, ensure_ascii=False), row["id"]))
+
+            #if (i + 1) % 50 == 0 or i == total - 1:
+            yield f"data: {json.dumps({'stage': 'processing', 'progress': i + 1, 'total': total, 'message': f'扫描中 {i+1}/{total}，已修改 {modified_count}'})}\n\n"
+
+        if not updates:
+            yield f"data: {json.dumps({'stage': 'done', 'result': {'modified': 0, 'messages_removed': 0, 'total': total}})}\n\n"
+            return
+
+        with get_conn() as conn:
+            batch_size = 100
+            for start in range(0, len(updates), batch_size):
+                batch = updates[start:start + batch_size]
+                conn.executemany("UPDATE records SET input = ? WHERE id = ?", batch)
+                conn.commit()
+                yield f"data: {json.dumps({'stage': 'updating', 'progress': min(start + batch_size, len(updates)), 'total': len(updates), 'message': f'更新中 {min(start + batch_size, len(updates))}/{len(updates)}'})}\n\n"
+
+        yield f"data: {json.dumps({'stage': 'done', 'result': {'modified': modified_count, 'messages_removed': messages_removed, 'total': total}})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _merge_consecutive_system(messages):
+    if len(messages) < 2:
+        return messages, False
+    result = []
+    changed = False
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if msg.get("role") != "system":
+            result.append(msg)
+            i += 1
+            continue
+        texts = [extract_text(msg.get("content"))]
+        j = i + 1
+        while j < len(messages) and messages[j].get("role") == "system":
+            texts.append(extract_text(messages[j].get("content")))
+            j += 1
+        if j > i + 1:
+            merged = dict(msg)
+            merged["content"] = "\n".join(t for t in texts if t)
+            result.append(merged)
+            changed = True
+        else:
+            result.append(msg)
+        i = j
+    return result, changed
+
+
+@router.post("/merge-consecutive-system")
+def merge_consecutive_system():
+    def generate():
+        with get_conn() as conn:
+            rows = conn.execute("SELECT id, input FROM records").fetchall()
+
+        total = len(rows)
+        yield f"data: {json.dumps({'stage': 'processing', 'progress': 0, 'total': total, 'message': f'共 {total} 条记录'})}\n\n"
+
+        modified_count = 0
+        messages_merged = 0
+        updates = []
+
+        for i, row in enumerate(rows):
+            try:
+                inp = json.loads(row["input"]) if row["input"] else {}
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(inp, dict):
+                continue
+            messages = inp.get("messages", [])
+            if not messages:
+                continue
+
+            new_messages, changed = _merge_consecutive_system(messages)
+            if changed:
+                removed = len(messages) - len(new_messages)
+                messages_merged += removed
+                modified_count += 1
+                inp["messages"] = new_messages
+                updates.append((json.dumps(inp, ensure_ascii=False), row["id"]))
+
+            yield f"data: {json.dumps({'stage': 'processing', 'progress': i + 1, 'total': total, 'message': f'扫描中 {i+1}/{total}，已修改 {modified_count}'})}\n\n"
+
+        if not updates:
+            yield f"data: {json.dumps({'stage': 'done', 'result': {'modified': 0, 'messages_merged': 0, 'total': total}})}\n\n"
+            return
+
+        with get_conn() as conn:
+            batch_size = 100
+            for start in range(0, len(updates), batch_size):
+                batch = updates[start:start + batch_size]
+                conn.executemany("UPDATE records SET input = ? WHERE id = ?", batch)
+                conn.commit()
+                yield f"data: {json.dumps({'stage': 'updating', 'progress': min(start + batch_size, len(updates)), 'total': len(updates), 'message': f'更新中 {min(start + batch_size, len(updates))}/{len(updates)}'})}\n\n"
+
+        yield f"data: {json.dumps({'stage': 'done', 'result': {'modified': modified_count, 'messages_merged': messages_merged, 'total': total}})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
