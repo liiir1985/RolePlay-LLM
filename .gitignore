@@ -155,3 +155,4 @@ outputs/
 models/
 checkpoint/
 logs/
+/tools/annotation/frontend/node_modules
