@@ -63,7 +63,7 @@ export default function Records() {
   const [msg, setMsg] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const limit = 50
+  const limit = 20
 
   const load = async () => {
     const data = await api.listRecords(page, limit, search, startTime, endTime)
@@ -92,7 +92,7 @@ export default function Records() {
 
   return (
     <div style={{ display: 'flex', gap: 16 }}>
-      <div style={{ flex: selectedId ? '0 0 45%' : '1' }}>
+      <div style={{ flex: '1', minWidth: 0, overflow: 'hidden' }}>
         <div className="page-title">数据记录</div>
         <div className="card">
           <div className="flex">
@@ -127,7 +127,7 @@ export default function Records() {
               {records.map(r => (
                 <tr
                   key={r.id}
-                  onClick={() => setSelectedId(r.id)}
+                  onClick={() => setSelectedId(prev => prev === r.id ? null : r.id)}
                   style={{ cursor: 'pointer', background: selectedId === r.id ? '#e8f0fe' : undefined }}
                 >
                   <td style={{ fontFamily: 'monospace', fontSize: 11, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.id}</td>
@@ -149,7 +149,7 @@ export default function Records() {
         </div>
       </div>
       {selectedId && (
-        <div style={{ flex: '1', minWidth: 0, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto' }}>
+        <div style={{ flex: '0 0 40%', minWidth: 0, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto' }}>
           <RecordDetail recordId={selectedId} onClose={() => setSelectedId(null)} />
         </div>
       )}

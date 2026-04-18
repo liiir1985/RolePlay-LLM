@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react'
 import { api } from '../api'
+import JsonViewer from '../components/JsonViewer'
+
+function parseJson(str: string | null): unknown {
+  if (!str) return null
+  try { return JSON.parse(str) } catch { return str }
+}
 
 function AddRawModal({ datasetId, onClose, onSaved }: { datasetId: number; onClose: () => void; onSaved: () => void }) {
   const [records, setRecords] = useState<any[]>([])
@@ -9,7 +15,7 @@ function AddRawModal({ datasetId, onClose, onSaved }: { datasetId: number; onClo
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const limit = 50
+  const limit = 20
 
   const load = async () => {
     const data = await api.listRecords(page, limit, search, startTime, endTime)
@@ -90,7 +96,7 @@ function AddAnnotatedModal({ datasetId, onClose, onSaved }: { datasetId: number;
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const limit = 50
+  const limit = 20
 
   useEffect(() => { api.listQueues().then(setQueues) }, [])
 
@@ -181,7 +187,9 @@ export default function Datasets() {
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [annFilter, setAnnFilter] = useState('')
-  const limit = 50
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const [detailRecord, setDetailRecord] = useState<any>(null)
+  const limit = 20
 
   const loadDatasets = () => api.listDatasets().then(setDatasets)
   const loadItems = async (did: number, pg = 1) => {
@@ -191,6 +199,10 @@ export default function Datasets() {
 
   useEffect(() => { loadDatasets() }, [])
   useEffect(() => { if (selected) loadItems(selected) }, [selected, sourceFilter, startTime, endTime, annFilter])
+  useEffect(() => {
+    if (detailId) api.getRecord(detailId).then(setDetailRecord)
+    else setDetailRecord(null)
+  }, [detailId])
 
   const create = async () => {
     if (!newName.trim()) return
@@ -224,79 +236,114 @@ export default function Datasets() {
           <button className="btn-primary" onClick={create}>创建</button>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 16 }}>
-        <div>
-          {datasets.map(d => (
-            <div key={d.id} className="card" style={{ cursor: 'pointer', background: selected === d.id ? '#e0e7ff' : '#fff', marginBottom: 8 }} onClick={() => setSelected(d.id)}>
-              <div className="flex">
-                <div className="flex-1">
-                  <strong>{d.name}</strong>
-                  <div style={{ fontSize: 12, color: '#666' }}>{d.item_count} 条</div>
+      <div style={{ display: 'flex', gap: 16 }}>
+        <div style={{ flex: '1', minWidth: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 16 }}>
+            <div>
+              {datasets.map(d => (
+                <div key={d.id} className="card" style={{ cursor: 'pointer', background: selected === d.id ? '#e0e7ff' : '#fff', marginBottom: 8 }} onClick={() => setSelected(d.id)}>
+                  <div className="flex">
+                    <div className="flex-1">
+                      <strong>{d.name}</strong>
+                      <div style={{ fontSize: 12, color: '#666' }}>{d.item_count} 条</div>
+                    </div>
+                    <button className="btn-danger btn-sm" onClick={e => { e.stopPropagation(); del(d.id) }}>删除</button>
+                  </div>
                 </div>
-                <button className="btn-danger btn-sm" onClick={e => { e.stopPropagation(); del(d.id) }}>删除</button>
-              </div>
+              ))}
+              {datasets.length === 0 && <div className="empty card">暂无数据集</div>}
             </div>
-          ))}
-          {datasets.length === 0 && <div className="empty card">暂无数据集</div>}
+            <div>
+              {selected && ds ? (
+                <div className="card">
+                  <div className="flex" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                    <strong style={{ fontSize: 15 }}>{ds.name}</strong>
+                    <span style={{ flex: 1 }}></span>
+                    <button className="btn-secondary btn-sm" onClick={() => setShowRaw(true)}>+ 原始数据</button>
+                    <button className="btn-secondary btn-sm" onClick={() => setShowAnnotated(true)}>+ 标注数据</button>
+                    <a href={`/api/datasets/${selected}/export`} download style={{ textDecoration: 'none' }}>
+                      <button className="btn-primary btn-sm">导出 JSONL</button>
+                    </a>
+                  </div>
+                  <div className="flex" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                    <select value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); setItemPage(1) }} style={{ width: 'auto' }}>
+                      <option value="">全部来源</option>
+                      <option value="raw">原始</option>
+                      <option value="annotated">已标注</option>
+                    </select>
+                    <label style={{ fontSize: 12, color: '#555', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      从 <input type="datetime-local" value={startTime} onChange={e => { setStartTime(e.target.value); setItemPage(1) }} style={{ width: 'auto' }} />
+                    </label>
+                    <label style={{ fontSize: 12, color: '#555', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      到 <input type="datetime-local" value={endTime} onChange={e => { setEndTime(e.target.value); setItemPage(1) }} style={{ width: 'auto' }} />
+                    </label>
+                    <input type="text" placeholder="标注字段搜索..." value={annFilter} onChange={e => { setAnnFilter(e.target.value); setItemPage(1) }} style={{ maxWidth: 180 }} />
+                  </div>
+                  <table style={{ fontSize: 12 }}>
+                    <thead>
+                      <tr><th>ID</th><th>时间</th><th>Input</th><th>Output</th><th>来源</th><th>标注</th><th>操作</th></tr>
+                    </thead>
+                    <tbody>
+                      {items.map(item => (
+                        <tr key={item.id} onClick={() => setDetailId(prev => prev === item.record_id ? null : item.record_id)} style={{ cursor: 'pointer', background: detailId === item.record_id ? '#e8f0fe' : undefined }}>
+                          <td style={{ fontFamily: 'monospace', fontSize: 11, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.record_id}</td>
+                          <td style={{ whiteSpace: 'nowrap', color: '#666' }}>{item.timestamp?.slice(0, 19).replace('T', ' ')}</td>
+                          <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.input_preview}</td>
+                          <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.output_preview}</td>
+                          <td><span className={`badge badge-${item.source}`}>{item.source === 'raw' ? '原始' : '已标注'}</span></td>
+                          <td style={{ fontSize: 11, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.annotations ? Object.entries(item.annotations).map(([k, v]) => <span key={k} className="tag">{k}: {String(v)}</span>) : '-'}
+                          </td>
+                          <td><button className="btn-danger btn-sm" onClick={e => { e.stopPropagation(); removeItem(item.id) }}>移除</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {items.length === 0 && <div className="empty">暂无数据，请添加</div>}
+                  {totalPages > 1 && (
+                    <div className="pagination">
+                      <button className="btn-secondary btn-sm" onClick={() => loadItems(selected, itemPage - 1)} disabled={itemPage === 1}>上一页</button>
+                      <span>{itemPage}/{totalPages}</span>
+                      <button className="btn-secondary btn-sm" onClick={() => loadItems(selected, itemPage + 1)} disabled={itemPage === totalPages}>下一页</button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="empty card">请选择一个数据集</div>
+              )}
+            </div>
+          </div>
         </div>
-        <div>
-          {selected && ds ? (
-            <div className="card">
-              <div className="flex" style={{ marginBottom: 12 }}>
-                <strong style={{ flex: 1, fontSize: 15 }}>{ds.name}</strong>
-                <button className="btn-secondary btn-sm" onClick={() => setShowRaw(true)}>+ 原始数据</button>
-                <button className="btn-secondary btn-sm" onClick={() => setShowAnnotated(true)}>+ 标注数据</button>
-                <a href={`/api/datasets/${selected}/export`} download style={{ textDecoration: 'none' }}>
-                  <button className="btn-primary btn-sm">导出 JSONL</button>
-                </a>
+        {detailId && detailRecord && (
+          <div style={{ flex: '0 0 40%', minWidth: 0, maxHeight: 'calc(100vh - 40px)', overflowY: 'auto' }}>
+            <div className="flex" style={{ marginBottom: 12 }}>
+              <button className="btn-secondary btn-sm" onClick={() => setDetailId(null)}>✕ 关闭</button>
+              <span style={{ marginLeft: 12, fontFamily: 'monospace', fontSize: 11, color: '#666' }}>{detailId}</span>
+            </div>
+            <div className="detail-panel">
+              <div className="card">
+                <details open>
+                  <summary>Input</summary>
+                  <div style={{ marginTop: 8 }}><JsonViewer data={parseJson(detailRecord.input)} initialExpanded={3} /></div>
+                </details>
               </div>
-              <div className="flex" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-                <select value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); setItemPage(1) }} style={{ width: 'auto' }}>
-                  <option value="">全部来源</option>
-                  <option value="raw">原始</option>
-                  <option value="annotated">已标注</option>
-                </select>
-                <label style={{ fontSize: 12, color: '#555', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  从 <input type="datetime-local" value={startTime} onChange={e => { setStartTime(e.target.value); setItemPage(1) }} style={{ width: 'auto' }} />
-                </label>
-                <label style={{ fontSize: 12, color: '#555', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  到 <input type="datetime-local" value={endTime} onChange={e => { setEndTime(e.target.value); setItemPage(1) }} style={{ width: 'auto' }} />
-                </label>
-                <input type="text" placeholder="标注字段搜索..." value={annFilter} onChange={e => { setAnnFilter(e.target.value); setItemPage(1) }} style={{ maxWidth: 180 }} />
+              <div className="card">
+                <details open>
+                  <summary>Output</summary>
+                  <div style={{ marginTop: 8 }}><JsonViewer data={parseJson(detailRecord.output)} initialExpanded={3} /></div>
+                </details>
               </div>
-              <table style={{ fontSize: 12 }}>
-                <thead>
-                  <tr><th>ID</th><th>时间</th><th>Input</th><th>Output</th><th>来源</th><th>标注</th><th>操作</th></tr>
-                </thead>
-                <tbody>
-                  {items.map(item => (
-                    <tr key={item.id}>
-                      <td style={{ fontFamily: 'monospace', fontSize: 11, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.record_id}</td>
-                      <td style={{ whiteSpace: 'nowrap', color: '#666' }}>{item.timestamp?.slice(0, 19).replace('T', ' ')}</td>
-                      <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.input_preview}</td>
-                      <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.output_preview}</td>
-                      <td><span className={`badge badge-${item.source}`}>{item.source === 'raw' ? '原始' : '已标注'}</span></td>
-                      <td style={{ fontSize: 11, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {item.annotations ? Object.entries(item.annotations).map(([k, v]) => <span key={k} className="tag">{k}: {String(v)}</span>) : '-'}
-                      </td>
-                      <td><button className="btn-danger btn-sm" onClick={() => removeItem(item.id)}>移除</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {items.length === 0 && <div className="empty">暂无数据，请添加</div>}
-              {totalPages > 1 && (
-                <div className="pagination">
-                  <button className="btn-secondary btn-sm" onClick={() => loadItems(selected, itemPage - 1)} disabled={itemPage === 1}>上一页</button>
-                  <span>{itemPage}/{totalPages}</span>
-                  <button className="btn-secondary btn-sm" onClick={() => loadItems(selected, itemPage + 1)} disabled={itemPage === totalPages}>下一页</button>
+              {detailRecord.metadata && (
+                <div className="card">
+                  <details>
+                    <summary>Metadata</summary>
+                    <div style={{ marginTop: 8 }}><JsonViewer data={parseJson(detailRecord.metadata)} initialExpanded={2} /></div>
+                  </details>
                 </div>
               )}
             </div>
-          ) : (
-            <div className="empty card">请选择一个数据集</div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
       {showRaw && selected && (
         <AddRawModal datasetId={selected} onClose={() => setShowRaw(false)} onSaved={() => { setShowRaw(false); loadItems(selected); loadDatasets() }} />

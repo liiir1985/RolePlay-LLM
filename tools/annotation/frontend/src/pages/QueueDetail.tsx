@@ -12,7 +12,7 @@ function AddItemsModal({ queueId, onClose, onSaved }: { queueId: number; onClose
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [selectAll, setSelectAll] = useState(false)
   const [adding, setAdding] = useState(false)
-  const limit = 50
+  const limit = 20
 
   const load = async () => {
     const data = await api.listRecords(page, limit, search, startTime, endTime)
@@ -135,7 +135,7 @@ export default function QueueDetail() {
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [showAdd, setShowAdd] = useState(false)
-  const limit = 50
+  const limit = 20
 
   const loadQueue = () => api.getQueue(qid).then(setQueue)
   const loadItems = async () => {
