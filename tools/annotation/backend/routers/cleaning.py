@@ -354,39 +354,38 @@ def merge_preview():
 
 
 class MergeExecuteIn(BaseModel):
-    chain_indices: List[int]
+    # Each item is a list of record IDs forming one chain (first ID is the surviving record)
+    chains: List[List[str]]
 
 
 @router.post("/merge-execute")
 def merge_execute(body: MergeExecuteIn):
     def generate():
-        yield f"data: {json.dumps({'stage': 'loading', 'progress': 0, 'message': '正在加载记录...'})}\n\n"
+        if not body.chains:
+            yield f"data: {json.dumps({'stage': 'error', 'message': '没有有效的会话链'})}\n\n"
+            return
+
+        # Collect all needed record IDs
+        all_ids = list({rid for chain in body.chains for rid in chain})
+        placeholders = ",".join("?" * len(all_ids))
 
         with get_conn() as conn:
             rows = conn.execute(
-                "SELECT id, timestamp, input, output, metadata FROM records ORDER BY timestamp ASC, id ASC"
+                f"SELECT id, timestamp, input, output, metadata FROM records WHERE id IN ({placeholders})",
+                all_ids,
             ).fetchall()
 
-        records = []
-        for i, row in enumerate(rows):
+        id_to_record = {}
+        for row in rows:
             parsed = parse_record(row)
             if parsed:
-                records.append(parsed)
-            if (i + 1) % 100 == 0 or i == len(rows) - 1:
-                yield f"data: {json.dumps({'stage': 'parsing', 'progress': i + 1, 'total': len(rows), 'message': f'解析记录 {i+1}/{len(rows)}'})}\n\n"
-
-        yield f"data: {json.dumps({'stage': 'detecting', 'progress': 0, 'total': len(records), 'message': '正在检测会话链...'})}\n\n"
-        chains = None
-        for item in detect_chains_streaming(records):
-            if isinstance(item, str):
-                yield item
-            else:
-                chains = item
+                id_to_record[parsed["id"]] = parsed
 
         selected = []
-        for idx in body.chain_indices:
-            if 0 <= idx < len(chains):
-                selected.append(chains[idx])
+        for chain_ids in body.chains:
+            chain = [id_to_record[rid] for rid in chain_ids if rid in id_to_record]
+            if len(chain) > 1:
+                selected.append(chain)
 
         if not selected:
             yield f"data: {json.dumps({'stage': 'error', 'message': '没有有效的会话链'})}\n\n"

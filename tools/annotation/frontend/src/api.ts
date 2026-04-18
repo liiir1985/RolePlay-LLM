@@ -95,11 +95,11 @@ export const api = {
       return read()
     })
   },
-  mergeExecuteStream: (chain_indices: number[], onEvent: (data: any) => void) => {
+  mergeExecuteStream: (chains: string[][], onEvent: (data: any) => void) => {
     return fetch(BASE + '/cleaning/merge-execute', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chain_indices }),
+      body: JSON.stringify({ chains }),
     }).then(res => {
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()

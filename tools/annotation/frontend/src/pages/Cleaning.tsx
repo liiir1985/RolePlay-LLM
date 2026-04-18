@@ -82,7 +82,10 @@ export default function Cleaning() {
     setError('')
     setProgress({ active: true, stage: 'merging', message: '正在执行合并...', progress: 0, total: selected.size })
     try {
-      await api.mergeExecuteStream(Array.from(selected), (event) => {
+      const chains = preview!.chains
+        .filter(c => selected.has(c.index))
+        .map(c => c.records.map(r => r.id))
+      await api.mergeExecuteStream(chains, (event) => {
         if (event.stage === 'done') {
           setResult(event.result)
           setPreview(null)
