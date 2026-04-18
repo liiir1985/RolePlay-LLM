@@ -5,6 +5,7 @@ import Queues from './pages/Queues'
 import QueueDetail from './pages/QueueDetail'
 import QueueItemDetail from './pages/QueueItemDetail'
 import Datasets from './pages/Datasets'
+import Cleaning from './pages/Cleaning'
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <NavLink to="/schemas">评估模板</NavLink>
           <NavLink to="/queues">评估队列</NavLink>
           <NavLink to="/datasets">数据集</NavLink>
+          <NavLink to="/cleaning">数据清洗</NavLink>
         </nav>
         <main className="main">
           <Routes>
@@ -26,6 +28,7 @@ export default function App() {
             <Route path="/queues/:queueId" element={<QueueDetail />} />
             <Route path="/queues/:queueId/items/:itemId" element={<QueueItemDetail />} />
             <Route path="/datasets" element={<Datasets />} />
+            <Route path="/cleaning" element={<Cleaning />} />
           </Routes>
         </main>
       </div>

@@ -73,4 +73,50 @@ export const api = {
   },
   removeDatasetItem: (did: number, iid: number) =>
     req<void>(`/datasets/${did}/items/${iid}`, { method: 'DELETE' }),
+
+  // cleaning (SSE streams)
+  mergePreviewStream: (onEvent: (data: any) => void) => {
+    return fetch(BASE + '/cleaning/merge-preview', { method: 'POST' }).then(res => {
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const read = (): Promise<void> => reader.read().then(({ done, value }) => {
+        if (done) return
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try { onEvent(JSON.parse(line.slice(6))) } catch {}
+          }
+        }
+        return read()
+      })
+      return read()
+    })
+  },
+  mergeExecuteStream: (chain_indices: number[], onEvent: (data: any) => void) => {
+    return fetch(BASE + '/cleaning/merge-execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chain_indices }),
+    }).then(res => {
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      const read = (): Promise<void> => reader.read().then(({ done, value }) => {
+        if (done) return
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try { onEvent(JSON.parse(line.slice(6))) } catch {}
+          }
+        }
+        return read()
+      })
+      return read()
+    })
+  },
 }
