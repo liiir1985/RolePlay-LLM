@@ -60,11 +60,10 @@ if NEEDS_PEFT_INIT:
     # 3. 添加 LoRA 适配器 (持续预训练关键配置)
     model = FastLanguageModel.get_peft_model(
         model,
-        r = 64, # LoRA Rank，持续预训练建议大一点 (32, 64, 128)
+        r = 32, # LoRA Rank，持续预训练建议大一点 (32, 64, 128)
         target_modules = [
             "q_proj", "k_proj", "v_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj",
-            "embed_tokens", "lm_head", # 持续预训练必须加上这两个！
         ],
         lora_alpha = 64,
         lora_dropout = 0,
@@ -123,11 +122,12 @@ def append_eos(examples):
     return {"text": formatted_texts}
 
 #dataset = dataset.map(append_eos, batched=True)
+dataset = dataset.shuffle(seed=42).select(range(50))
 dataset = dataset.map(format_to_fake_sft, batched=True)
 
 # 打印一条数据看看列名，确保 dataset_text_field 填对了
 print(f"数据列名: {dataset.column_names}")
-print(dataset[100]['text'])
+print(dataset[10]['text'])
 
 from transformers import TrainingArguments
 
@@ -146,9 +146,9 @@ trainer = UnslothTrainer(
 
         # Use warmup_ratio and num_train_epochs for longer runs!
         #max_steps = 120,
-        warmup_steps = 100,
+        warmup_steps = 10,
         # warmup_ratio = 0.1,
-        num_train_epochs = 1,
+        num_train_epochs = 30,
         save_strategy = "steps",     # 设置按步数保存
         save_steps = 100,            # 每 100 步保存一次
         save_total_limit = 3,        # 最多保存 3 份，旧的会被自动删除
@@ -169,5 +169,10 @@ trainer = UnslothTrainer(
         #report_to = "wandb", # Use TrackIO/WandB etc
     ),
 )
-
+from unsloth.chat_templates import train_on_responses_only
+trainer = train_on_responses_only(
+    trainer,
+    instruction_part = "<|im_start|>user\n",
+    response_part = "<|im_start|>assistant\n<think>",
+)
 trainer.train(resume_from_checkpoint = RESUME_ARG)

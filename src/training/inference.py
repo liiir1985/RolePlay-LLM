@@ -6,7 +6,7 @@ import torch
 # 1. 配置路径
 # ==========================================
 # 填入你最后保存的 Checkpoint 文件夹路径（包含 adapter_config.json 的那个文件夹）
-lora_dir = "outputs-Qwen35-0.8B/checkpoint-2700" 
+lora_dir = "outputs-Qwen35-0.8B/checkpoint-100" 
 #lora_dir = "models/Qwen3.5-0.8B"
 
 print(f"🚀 正在加载模型：{lora_dir} ...")
@@ -37,7 +37,8 @@ streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 print("\n" + "="*50)
 print("✅ 模型加载完毕！请输入前缀文本让模型续写。(输入 'quit' 退出)")
 print("="*50 + "\n")
-
+SYSTEM_PROMPT = "你是一个优秀的轻小说作家，擅长以生动的笔触描写场景、人物性格以及推动故事情节。"
+USER_PROMPT = "请以轻小说的笔触展开一段叙述。"
 while True:
     user_input = input("🗣️ 输入文本: ")
     
@@ -46,9 +47,22 @@ while True:
         break
     if not user_input.strip():
         continue
-
+    messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": USER_PROMPT + "\n" + user_input},
+            #{"role": "assistant", "content": user_input} # 将你的长文本切片作为 assistant 的回复
+        ]
+        
+        # 使用分词器自带的 chat_template 自动处理 <|im_start|> 和 <|im_end|> 等特殊 token
+        # tokenize=False 意味着返回的是拼装好的字符串，而不是 token id 列表
+        # add_generation_prompt=False 因为我们是在训练（包含完整回复），而不是在推理
+    formatted_chat = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
     # 把文本转为 Token 并推入显卡
-    inputs = tokenizer(text=[user_input], return_tensors="pt").to("cuda")
+    inputs = tokenizer(text=[formatted_chat], return_tensors="pt").to("cuda")
 
     print("🤖 模型输出: ", end="")
     
