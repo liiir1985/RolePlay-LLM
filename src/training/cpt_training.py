@@ -73,30 +73,18 @@ if NEEDS_PEFT_INIT:
 
 from datasets import load_dataset
 
-# 替换为你 parquet 文件的实际绝对路径
-dataset_path = "data/train-00000-of-00001.parquet" 
+# 替换为 jsonl 文件所在目录
+dataset_dir = "data/sft" 
 
-# 加载本地 Parquet 文件
-dataset = load_dataset("parquet", data_files={"train": dataset_path}, split="train")
+# 加载目录下所有的 jsonl 文件
+dataset = load_dataset("json", data_files={"train": f"{dataset_dir}/*.jsonl"}, split="train")
 
-# 1. 定义伪造的 Prompt
-# 可以根据你的轻小说风格调整 System 和 User 提示词
-SYSTEM_PROMPT = "你是一个优秀的轻小说作家，擅长以生动的笔触描写场景、人物性格以及推动故事情节。"
-USER_PROMPT = "请以轻小说的笔触展开一段叙述。"
-
-# 2. 重写数据格式化函数
-def format_to_fake_sft(examples):
-    texts = examples["text"]
+# 1. 数据已经是标准的消息格式，重写数据格式化函数
+def format_sft(examples):
+    all_messages = examples["messages"]
     formatted_texts = []
     
-    for text in texts:
-        # 构建标准的多轮对话格式列表
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": USER_PROMPT},
-            {"role": "assistant", "content": text} # 将你的长文本切片作为 assistant 的回复
-        ]
-        
+    for messages in all_messages:
         # 使用分词器自带的 chat_template 自动处理 <|im_start|> 和 <|im_end|> 等特殊 token
         # tokenize=False 意味着返回的是拼装好的字符串，而不是 token id 列表
         # add_generation_prompt=False 因为我们是在训练（包含完整回复），而不是在推理
@@ -122,8 +110,9 @@ def append_eos(examples):
     return {"text": formatted_texts}
 
 #dataset = dataset.map(append_eos, batched=True)
-dataset = dataset.shuffle(seed=42).select(range(50))
-dataset = dataset.map(format_to_fake_sft, batched=True)
+dataset = dataset.shuffle(seed=42)
+# dataset = dataset.select(range(50)) # 如果数据量很大可以切片测试
+dataset = dataset.map(format_sft, batched=True)
 
 # 打印一条数据看看列名，确保 dataset_text_field 填对了
 print(f"数据列名: {dataset.column_names}")
@@ -146,9 +135,9 @@ trainer = UnslothTrainer(
 
         # Use warmup_ratio and num_train_epochs for longer runs!
         #max_steps = 120,
-        warmup_steps = 10,
+        warmup_steps = 50,
         # warmup_ratio = 0.1,
-        num_train_epochs = 30,
+        num_train_epochs = 2,
         save_strategy = "steps",     # 设置按步数保存
         save_steps = 100,            # 每 100 步保存一次
         save_total_limit = 3,        # 最多保存 3 份，旧的会被自动删除
@@ -160,7 +149,7 @@ trainer = UnslothTrainer(
         max_grad_norm = 1.0,
         disable_tqdm = False,
 
-        logging_steps = 2,
+        logging_steps = 10,
         optim = "adamw_8bit",
         weight_decay = 0.001,
         lr_scheduler_type = "linear",
