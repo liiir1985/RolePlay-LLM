@@ -165,25 +165,30 @@ class LLMClient:
         **kwargs
     ) -> Any:
         if response_model is not None:
-            schema = response_model.model_json_schema()
-            # 移除 Pydantic 生成的顶层元数据字段
-            schema.pop("title", None)
-            schema.pop("$defs", None)
-            schema.pop("definitions", None)
-            schema_name = response_model.__name__
-            kwargs["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema_name,
-                    "schema": schema,
-                    "strict": False
+            if self.config.json_response_format == "json_object":
+                kwargs["response_format"] = {"type": "json_object"}
+            else:
+                schema = response_model.model_json_schema()
+                schema.pop("title", None)
+                schema.pop("$defs", None)
+                schema.pop("definitions", None)
+                schema_name = response_model.__name__
+                kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema_name,
+                        "schema": schema,
+                        "strict": False
+                    }
                 }
-            }
         elif json_schema:
-            kwargs["response_format"] = {
-                "type": "json_schema",
-                "json_schema": json_schema
-            }
+            if self.config.json_response_format == "json_object":
+                kwargs["response_format"] = {"type": "json_object"}
+            else:
+                kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": json_schema
+                }
             
         response = self.chat_completion(
             messages=messages,

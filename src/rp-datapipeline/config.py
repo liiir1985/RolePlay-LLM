@@ -19,6 +19,7 @@ class LLMConfig:
     max_retries: int = 3
     retry_delay: float = 1.0
     extra_body: Dict[str, Any] = field(default_factory=dict)
+    json_response_format: str = "json_schema"  # json_schema 或 json_object
 
 
 @dataclass
@@ -40,6 +41,13 @@ class Config:
                 self.llm.extra_body = json.loads(extra_body_env)
             except json.JSONDecodeError:
                 print(f"Warning: LLM_EXTRA_BODY is not valid JSON, ignored: {extra_body_env}")
+        
+        json_format_env = os.getenv("LLM_JSON_RESPONSE_FORMAT")
+        if json_format_env:
+            if json_format_env in ("json_schema", "json_object"):
+                self.llm.json_response_format = json_format_env
+            else:
+                print(f"Warning: LLM_JSON_RESPONSE_FORMAT must be 'json_schema' or 'json_object', ignored: {json_format_env}")
         
         raw_data_dir_env = os.getenv("RAW_DATA_DIR")
         if raw_data_dir_env:

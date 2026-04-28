@@ -32,6 +32,11 @@ OPENAI_MODEL="gpt-3.5-turbo"
 # LLM额外请求参数（JSON格式，可选，必须用单引号包裹避免与JSON双引号冲突）
 # 例如：禁用思考模式、设置top_k等
 # LLM_EXTRA_BODY='{"top_k": 20, "chat_template_kwargs": {"enable_thinking": false}}'
+
+# JSON响应格式模式（可选，默认json_schema）
+# json_schema: 使用JSON Schema约束输出（需模型支持structured output）
+# json_object: 仅约束输出为JSON对象（兼容性更好）
+# LLM_JSON_RESPONSE_FORMAT=json_schema
 ```
 
 ### 使用入口脚本
