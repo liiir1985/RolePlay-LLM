@@ -120,15 +120,18 @@ data/
 
 #### 输出格式
 
-每个场景保存为独立的txt文件，命名格式为：`{原文件名}_{splitid}.txt`
+每个原始文件会生成一个独立的子目录（名称为去除了后缀的原始文件名），切分后的场景保存为独立的txt文件放入该子目录中。
+
+命名格式：`{原文件名（无后缀）}_{splitid}.txt`
 
 例如：
-- 输入文件：`novel_name.txt`
-- 输出文件：
-  - `novel_name_000.txt`
-  - `novel_name_001.txt`
-  - `novel_name_002.txt`
-  - ...
+- 输入文件：`data/raw/novel_name.txt`
+- 输出目录与文件：
+  - `data/processed/1_1_scene_segmentation/novel_name/`
+    - `novel_name_000.txt`
+    - `novel_name_001.txt`
+    - `novel_name_002.txt`
+    - ...
 
 #### 使用方法
 

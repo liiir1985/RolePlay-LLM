@@ -195,7 +195,7 @@ class LLMBasedSceneSegmenter:
         sorted_boundaries = self._merge_adjacent_boundaries(sorted_boundaries)
         
         scenes = []
-        base_name = source_file.split('.')[0]
+        base_name = Path(source_file).stem
         
         for i in range(len(sorted_boundaries) - 1):
             start_line = sorted_boundaries[i]
@@ -238,7 +238,7 @@ def process_file(
     
     scenes = segmenter.segment(content, input_path.name)
     
-    base_name = input_path.name.split('.')[0]
+    base_name = input_path.stem
     
     # 为当前原始文件创建一个子目录
     file_output_dir = output_dir / base_name
