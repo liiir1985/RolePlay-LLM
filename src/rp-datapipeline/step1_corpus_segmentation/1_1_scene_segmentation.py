@@ -10,13 +10,14 @@ SCENE_DETECTION_SYSTEM_PROMPT = """你是一个专业的文本分析助手，擅
 
 场景定义：
 - 时空没有大范围变动的一段剧情
-- 或者是一段不可分割的连续时间的连续行动的描写
+- 或者是一段连续时间的连续行动的描写
 
 场景切换的常见特征：
 1. 时间发生明显变化（如"第二天"、"三年后"等）
 2. 地点发生明显变化（如从"教室"切换到"家里"）
-3. 整体文章叙事视角发生明显转换（仅当文章的POV切换，比如旁白提到的“我”所指代的角色变了）
-4. 章节或场景分隔符（如"* * *"、"---"等）
+
+不应该被切分的情况：
+- 地点虽然发生了变化，但是在较短的连续时间内发生的一系列动作，例如：一队警察对嫌犯进行抓捕，从室外进入屋内，穿过几个房间把嫌犯压在了地上
 
 你的任务：
 分析给定的文本段落，找出所有发生场景切换的行号。
@@ -30,6 +31,11 @@ SCENE_DETECTION_SYSTEM_PROMPT = """你是一个专业的文本分析助手，擅
 {
   "scene_changes": [5, 12, 28]
 }
+或者：
+{
+  "scene_changes": []
+}
+
 """
 
 
@@ -44,33 +50,33 @@ class LLMBasedSceneSegmenter:
         self.llm_client = llm_client or LLMClient()
         self.min_scene_chars = min_scene_chars
     
-    def _split_into_chunks(self, text: str) -> List[str]:
+    def _split_into_chunks_by_lines(self, lines: List[str]) -> List[List[str]]:
         chunks = []
-        start = 0
-        text_length = len(text)
+        current_chunk = []
+        current_length = 0
         
-        while start < text_length:
-            end = min(start + self.chunk_size, text_length)
+        for line in lines:
+            # 加上换行符的长度
+            line_length = len(line) + 1
             
-            if end < text_length:
-                last_newline = text.rfind('\n', start, end)
-                if last_newline > start:
-                    end = last_newline + 1
+            if current_length + line_length > self.chunk_size and current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = [line]
+                current_length = line_length
+            else:
+                current_chunk.append(line)
+                current_length += line_length
+                
+        if current_chunk:
+            chunks.append(current_chunk)
             
-            chunk = text[start:end]
-            chunks.append(chunk)
-            start = end
-        
         return chunks
     
-    def _add_line_numbers(self, text: str, start_line: int = 1) -> str:
-        lines = text.split('\n')
+    def _add_line_numbers(self, lines: List[str], start_line: int = 1) -> str:
         numbered_lines = []
-        
         for i, line in enumerate(lines):
             line_num = start_line + i
             numbered_lines.append(f"{line_num}: {line}")
-        
         return '\n'.join(numbered_lines)
     
     def _detect_scene_boundaries_with_llm(
@@ -158,7 +164,7 @@ class LLMBasedSceneSegmenter:
         lines = content.split('\n')
         total_lines = len(lines)
         
-        chunks = self._split_into_chunks(content)
+        chunks = self._split_into_chunks_by_lines(lines)
         
         all_boundaries = set()
         all_boundaries.add(1)
@@ -166,11 +172,10 @@ class LLMBasedSceneSegmenter:
         
         current_line = 1
         
-        for chunk_idx, chunk in enumerate(chunks):
-            chunk_lines = chunk.split('\n')
+        for chunk_idx, chunk_lines in enumerate(chunks):
             chunk_line_count = len(chunk_lines)
             
-            numbered_chunk = self._add_line_numbers(chunk, current_line)
+            numbered_chunk = self._add_line_numbers(chunk_lines, current_line)
             
             print(f"  处理chunk {chunk_idx + 1}/{len(chunks)} (行 {current_line}-{current_line + chunk_line_count - 1})")
             
@@ -180,7 +185,8 @@ class LLMBasedSceneSegmenter:
             )
             
             for boundary in chunk_boundaries:
-                if current_line <= boundary <= current_line + chunk_line_count:
+                # 确保边界在当前 chunk 的合理范围内，并且不是强制第一行
+                if current_line < boundary <= current_line + chunk_line_count:
                     all_boundaries.add(boundary)
             
             current_line += chunk_line_count
@@ -189,7 +195,7 @@ class LLMBasedSceneSegmenter:
         sorted_boundaries = self._merge_adjacent_boundaries(sorted_boundaries)
         
         scenes = []
-        base_name = Path(source_file).stem
+        base_name = source_file.split('.')[0]
         
         for i in range(len(sorted_boundaries) - 1):
             start_line = sorted_boundaries[i]
@@ -232,14 +238,20 @@ def process_file(
     
     scenes = segmenter.segment(content, input_path.name)
     
-    base_name = input_path.stem
+    base_name = input_path.name.split('.')[0]
+    
+    # 为当前原始文件创建一个子目录
+    file_output_dir = output_dir / base_name
+    file_output_dir.mkdir(parents=True, exist_ok=True)
     
     for scene in scenes:
-        scene_file = output_dir / f"{base_name}_{scene['scene_id'].split('_')[-1]}.txt"
+        # 获取切分ID（假设 scene_id 格式为 "xxxx_000"，这里取最后的数字部分）
+        split_id = scene['scene_id'].split('_')[-1]
+        scene_file = file_output_dir / f"{base_name}_{split_id}.txt"
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(scene['content'])
         
-        print(f"  输出: {scene_file.name} (行 {scene['start_line']}-{scene['end_line']}, {scene['char_count']} 字符)")
+        print(f"  输出: {scene_file.relative_to(output_dir)} (行 {scene['start_line']}-{scene['end_line']}, {scene['char_count']} 字符)")
     
     return len(scenes)
 
