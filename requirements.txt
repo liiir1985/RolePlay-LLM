@@ -7,3 +7,5 @@ python-dotenv
 datasets
 huggingface-hub
 pyarrow
+openai
+
