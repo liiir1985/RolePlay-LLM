@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
+from pydantic import BaseModel
+
 from ..utils.llm_client import LLMClient, ChatMessage
 
 
@@ -37,6 +39,10 @@ SCENE_DETECTION_SYSTEM_PROMPT = """你是一个专业的文本分析助手，擅
 }
 
 """
+
+
+class SceneSegmentationResponse(BaseModel):
+    scene_changes: List[int]
 
 
 class LLMBasedSceneSegmenter:
@@ -96,32 +102,15 @@ class LLMBasedSceneSegmenter:
             ChatMessage(role="user", content=user_prompt)
         ]
         
-        schema = {
-            "name": "scene_segmentation",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "scene_changes": {
-                        "type": "array",
-                        "items": {
-                            "type": "integer"
-                        },
-                        "description": "发生场景切换的行号列表，如果没有切换则为空数组"
-                    }
-                },
-                "required": ["scene_changes"],
-                "additionalProperties": False
-            },
-            "strict": True
-        }
-        
         try:
             response = self.llm_client.chat_with_json_response(
                 messages=messages,
-                json_schema=schema
+                response_model=SceneSegmentationResponse
             )
             
-            if isinstance(response, dict) and "scene_changes" in response:
+            if isinstance(response, SceneSegmentationResponse):
+                boundaries = response.scene_changes
+            elif isinstance(response, dict) and "scene_changes" in response:
                 boundaries = response["scene_changes"]
             elif isinstance(response, list):
                 boundaries = response

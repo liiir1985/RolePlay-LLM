@@ -28,6 +28,10 @@ copy .env.example .env
 OPENAI_API_KEY="your-api-key-here"
 OPENAI_BASE_URL="https://api.openai.com/v1"  # 或第三方API地址
 OPENAI_MODEL="gpt-3.5-turbo"
+
+# LLM额外请求参数（JSON格式，可选，必须用单引号包裹避免与JSON双引号冲突）
+# 例如：禁用思考模式、设置top_k等
+# LLM_EXTRA_BODY='{"top_k": 20, "chat_template_kwargs": {"enable_thinking": false}}'
 ```
 
 ### 使用入口脚本
@@ -147,6 +151,73 @@ python src/rp-datapipeline/step1_corpus_segmentation/1_1_scene_segmentation.py \
 
 ---
 
+### 1.2 角色名字和Alias提取
+
+**脚本名称**：`1_2_character_extraction.py`
+
+**输入目录**：`data/processed/1_1_scene_segmentation/`
+**输出目录**：`data/processed/1_1_scene_segmentation/`（与输入相同，直接在原目录输出）
+
+#### 功能描述
+
+使用LLM从切分后的场景文本中提取所有角色的名字和Alias，为后续的角色对话分析和数据集生成做准备。
+
+#### 处理流程
+
+1. **遍历书籍目录**：遍历输入目录中的所有子目录（每个子目录代表一本书）
+2. **逐段提取角色**：
+   - 遍历一本书中的每个分段文本
+   - 将当前已知的人名列表（只传递第一个名称，不传递所有alias，减少token消耗）和该段文字传递给LLM
+   - LLM只返回第一个名称和新出现的名称（不需要返回完整的alias列表）
+3. **分段角色缓存**：将当前分段识别后的名字列表（原始名称，非正式名字）缓存下来，缓存结构为 `{分段文件名: [角色名称列表]}`
+4. **角色名称合并与去重**：
+   - 如果角色已存在于输入列表中，保持原有顺序，添加新alias
+   - 合并时注意排重，一模一样的称呼不要出现2次
+   - 排除人称代词（我、你、他、她等）和模糊形容词（那个家伙、戴绿帽子的等）
+5. **正式名字识别**：对每一组名称列表，通过LLM找出该角色的正式名字
+6. **生成输出文件**：
+   - 生成 `characters.json`：整本书的角色列表
+   - 生成 `{分段文件名}_characters.json`：使用缓存的分段角色列表，将原始名称替换为正式名字
+
+#### 输出格式
+
+**整本书角色文件**：`characters.json`
+
+```json
+[
+  {
+    "name": "角色A",
+    "alias": ["小A", "A酱"]
+  },
+  {
+    "name": "角色B",
+    "alias": ["B哥"]
+  }
+]
+```
+
+**分段角色文件**：`{分段文件名}_characters.json`
+
+```json
+["角色A", "角色B"]
+```
+
+#### 使用方法
+
+```bash
+python src/rp-datapipeline/step1_corpus_segmentation/1_2_character_extraction.py \
+  --input data/processed/1_1_scene_segmentation/ \
+  --output data/processed/1_1_scene_segmentation/
+```
+
+或使用入口脚本：
+
+```bash
+python -m src.rp-datapipeline.run --step 1_2
+```
+
+---
+
 ## 步骤2：场景上下文提炼
 
 *（占位符，待后续实现时补充）*
@@ -176,6 +247,7 @@ python src/rp-datapipeline/step1_corpus_segmentation/1_1_scene_segmentation.py \
 提供统一的OpenAI兼容API调用接口，支持：
 - 标准chat completion
 - 流式输出
+- JSON结构化输出（支持Pydantic model自动生成JSON Schema）
 - 自动重试机制
 - 错误处理
 
@@ -190,6 +262,7 @@ python src/rp-datapipeline/step1_corpus_segmentation/1_1_scene_segmentation.py \
 
 ```python
 from src.rp-datapipeline.utils.llm_client import LLMClient, ChatMessage
+from pydantic import BaseModel
 
 # 创建客户端
 client = LLMClient()
@@ -207,6 +280,17 @@ messages = [
 ]
 response = client.chat_completion(messages=messages)
 print(response.content)
+
+# 结构化JSON输出（使用Pydantic model）
+class MyResponse(BaseModel):
+    answer: str
+    confidence: float
+
+response = client.chat_with_json_response(
+    messages=messages,
+    response_model=MyResponse  # 自动生成JSON Schema，返回值为MyResponse实例
+)
+print(response.answer, response.confidence)
 
 # 流式输出
 for chunk in client.chat_completion_stream(messages=messages):

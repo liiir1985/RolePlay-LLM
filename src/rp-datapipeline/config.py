@@ -1,6 +1,7 @@
 import os
+import json
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
 
@@ -17,6 +18,7 @@ class LLMConfig:
     timeout: int = 60
     max_retries: int = 3
     retry_delay: float = 1.0
+    extra_body: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -31,6 +33,13 @@ class Config:
         self.llm.api_key = os.getenv("OPENAI_API_KEY", self.llm.api_key)
         self.llm.base_url = os.getenv("OPENAI_BASE_URL", self.llm.base_url)
         self.llm.model = os.getenv("OPENAI_MODEL", self.llm.model)
+        
+        extra_body_env = os.getenv("LLM_EXTRA_BODY")
+        if extra_body_env:
+            try:
+                self.llm.extra_body = json.loads(extra_body_env)
+            except json.JSONDecodeError:
+                print(f"Warning: LLM_EXTRA_BODY is not valid JSON, ignored: {extra_body_env}")
         
         raw_data_dir_env = os.getenv("RAW_DATA_DIR")
         if raw_data_dir_env:

@@ -53,6 +53,15 @@ def _init_step_registry():
             "min_scene_chars": 100
         }
     )
+    
+    register_step(
+        step_id="1_2",
+        module_name="src.rp-datapipeline.step1_corpus_segmentation.1_2_character_extraction",
+        description="角色名字和Alias提取：从切分后的场景文本中提取角色名字和Alias",
+        default_input=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_output=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_params={}
+    )
 
 
 _init_step_registry()

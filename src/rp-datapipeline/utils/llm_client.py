@@ -1,12 +1,15 @@
 import time
 import json
-from typing import Optional, List, Dict, Any, Iterator
+from typing import Optional, List, Dict, Any, Iterator, Type, TypeVar
 from dataclasses import dataclass, asdict
 
 from openai import OpenAI, APIError, APIConnectionError, RateLimitError
 from openai.types.chat import ChatCompletionMessageParam
+from pydantic import BaseModel
 
 from ..config import LLMConfig, get_config
+
+T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass
@@ -63,6 +66,7 @@ class LLMClient:
                     messages=self._build_messages(messages),
                     temperature=temperature if temperature is not None else self.config.temperature,
                     max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+                    extra_body=self.config.extra_body if self.config.extra_body else None,
                     **kwargs
                 )
                 
@@ -108,6 +112,7 @@ class LLMClient:
                     temperature=temperature if temperature is not None else self.config.temperature,
                     max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
                     stream=True,
+                    extra_body=self.config.extra_body if self.config.extra_body else None,
                     **kwargs
                 )
                 
@@ -153,12 +158,28 @@ class LLMClient:
     def chat_with_json_response(
         self,
         messages: List[ChatMessage],
+        response_model: Optional[Type[T]] = None,
         json_schema: Optional[Dict[str, Any]] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> Any:
-        if json_schema:
+        if response_model is not None:
+            schema = response_model.model_json_schema()
+            # 移除 Pydantic 生成的顶层元数据字段
+            schema.pop("title", None)
+            schema.pop("$defs", None)
+            schema.pop("definitions", None)
+            schema_name = response_model.__name__
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "schema": schema,
+                    "strict": False
+                }
+            }
+        elif json_schema:
             kwargs["response_format"] = {
                 "type": "json_schema",
                 "json_schema": json_schema
@@ -182,7 +203,10 @@ class LLMClient:
         content = content.strip()
         
         try:
-            return json.loads(content)
+            parsed = json.loads(content)
+            if response_model is not None:
+                return response_model.model_validate(parsed)
+            return parsed
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse JSON response: {e}\nResponse: {response.content}")
     
