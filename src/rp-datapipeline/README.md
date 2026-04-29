@@ -172,17 +172,19 @@ python src/rp-datapipeline/step1_corpus_segmentation/1_1_scene_segmentation.py \
 1. **遍历书籍目录**：遍历输入目录中的所有子目录（每个子目录代表一本书）
 2. **逐段提取角色**：
    - 遍历一本书中的每个分段文本
-   - 将当前已知的人名列表（只传递第一个名称，不传递所有alias，减少token消耗）和该段文字传递给LLM
-   - LLM只返回第一个名称和新出现的名称（不需要返回完整的alias列表）
-3. **分段角色缓存**：将当前分段识别后的名字列表（原始名称，非正式名字）缓存下来，缓存结构为 `{分段文件名: [角色名称列表]}`
-4. **角色名称合并与去重**：
-   - 如果角色已存在于输入列表中，保持原有顺序，添加新alias
+   - 将当前已知的人名列表和该段文字传递给LLM
+   - LLM返回当前段落出现的所有角色称呼（已知角色需附带至少一个已知称呼以便代码合并）
+   - 同时判断叙事视角（第一人称/第三人称），如果是第一人称，尝试识别"我"对应的角色名称
+3. **分段角色缓存**：将当前分段识别后的名字列表和POV信息缓存下来
+4. **POV回填**：如果某段是第一人称但未能识别主角名，会在后续段落确认主角名后回填（仅限同一本书内）
+5. **角色名称合并与去重**：
+   - 如果角色已存在于已知列表中，通过名称匹配（精确匹配或子串包含关系）进行合并
    - 合并时注意排重，一模一样的称呼不要出现2次
    - 排除人称代词（我、你、他、她等）和模糊形容词（那个家伙、戴绿帽子的等）
-5. **正式名字识别**：对每一组名称列表，通过LLM找出该角色的正式名字
-6. **生成输出文件**：
+6. **正式名字识别**：对每一组名称列表，通过LLM找出该角色的本名（姓+名，不带敬称后缀）
+7. **生成输出文件**：
    - 生成 `characters.json`：整本书的角色列表
-   - 生成 `{分段文件名}_characters.json`：使用缓存的分段角色列表，将原始名称替换为正式名字
+   - 生成 `{分段文件名}_characters.json`：包含POV信息和出场角色的正式名字列表
 
 #### 输出格式
 
@@ -204,8 +206,16 @@ python src/rp-datapipeline/step1_corpus_segmentation/1_1_scene_segmentation.py \
 **分段角色文件**：`{分段文件名}_characters.json`
 
 ```json
-["角色A", "角色B"]
+{
+  "is_pov": true,
+  "pov_name": "角色A",
+  "characters": ["角色A", "角色B"]
+}
 ```
+
+- `is_pov`：该段文本是否以第一人称视角书写
+- `pov_name`：第一人称"我"对应的角色正式名字（非第一人称或无法识别时为空字符串）
+- `characters`：该段出场角色的正式名字列表
 
 #### 使用方法
 
@@ -219,6 +229,68 @@ python src/rp-datapipeline/step1_corpus_segmentation/1_2_character_extraction.py
 
 ```bash
 python -m src.rp-datapipeline.run --step 1_2
+```
+
+---
+
+### 1.3 场景事实与上下文提炼
+
+**脚本名称**：`1_3_scene_context_extraction.py`
+
+**输入目录**：`data/processed/1_1_scene_segmentation/`
+**输出目录**：`data/processed/1_1_scene_segmentation/`（与输入相同，直接在原目录输出）
+
+#### 功能描述
+
+根据前两步的输出（按场景切好段的文本和该文本中出现的角色列表），使用LLM提取该段文本中关于客观环境的事实设定，以及每个出场角色在这段文本中的表现。
+
+#### 处理流程
+
+1. **读取数据**：遍历输入目录，读取场景段落 `*.txt` 文件及其对应的 `{分段文件名}_characters.json` 和整本书的 `characters.json`。
+2. **组装角色列表**：将出场角色格式化为 `本名（别称：别名A、别名B……）` 的字符串。
+3. **构建Prompt**：为了最大化节省Token并利用KV Cache，将静态指令要求放在Prompt最前，动态变化的文本内容和角色列表放在最末尾。
+4. **LLM提取**：请求LLM提取以下内容：
+   - 提取的环境/世界观设定（人物行为外的客观场景、环境特点、人物行为引起的变化、世界观设定）
+   - 提取的角色设定（每个出场角色一条，key为本名，关注关键决定、性格特征、关系变化）
+   - 简明扼要的段落总结（记录fact即可，无修辞和感受描述）
+5. **保存结果**：将结构化JSON结果写入同目录的 `{分段文件名}_facts.json` 文件中。
+
+#### 输出格式
+
+**场景事实文件**：`{分段文件名}_facts.json`
+
+```json
+{
+  "environment_facts": [
+    "场景发生在教室",
+    "因为某人的行为导致课桌发生变化"
+  ],
+  "character_facts": [
+    {
+      "name": "角色A",
+      "facts": [
+        "决定隐瞒秘密",
+        "表现出谨慎、沉着的性格",
+        "与角色B的关系变得紧张"
+      ]
+    }
+  ],
+  "summary": "角色A在教室发生意外后决定隐瞒秘密，导致与角色B关系紧张。"
+}
+```
+
+#### 使用方法
+
+```bash
+python src/rp-datapipeline/step1_corpus_segmentation/1_3_scene_context_extraction.py \
+  --input data/processed/1_1_scene_segmentation/ \
+  --output data/processed/1_1_scene_segmentation/
+```
+
+或使用入口脚本：
+
+```bash
+python -m src.rp-datapipeline.run --step 1_3
 ```
 
 ---

@@ -62,6 +62,15 @@ def _init_step_registry():
         default_output=f"{config.processed_data_dir}/1_1_scene_segmentation",
         default_params={}
     )
+    
+    register_step(
+        step_id="1_3",
+        module_name="src.rp-datapipeline.step1_corpus_segmentation.1_3_scene_context_extraction",
+        description="场景事实与上下文提炼：提取环境设定、角色表现设定及段落事实总结",
+        default_input=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_output=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_params={}
+    )
 
 
 _init_step_registry()

@@ -234,9 +234,7 @@ def process_file(
     file_output_dir.mkdir(parents=True, exist_ok=True)
     
     for scene in scenes:
-        # 获取切分ID（假设 scene_id 格式为 "xxxx_000"，这里取最后的数字部分）
-        split_id = scene['scene_id'].split('_')[-1]
-        scene_file = file_output_dir / f"{base_name}_{split_id}.txt"
+        scene_file = file_output_dir / f"{scene['scene_id']}.txt"
         with open(scene_file, 'w', encoding='utf-8') as f:
             f.write(scene['content'])
         
