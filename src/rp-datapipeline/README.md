@@ -355,6 +355,127 @@ python -m src.rp-datapipeline.run --step 1_4
 
 ---
 
+### 1.5 对话切分与JSONL数据集生成
+
+**脚本名称**：`1_5_dialogue_segmentation.py`
+
+**输入目录**：`data/processed/1_1_scene_segmentation/`
+**输出目录**：`data/processed/1_1_scene_segmentation/`（与输入相同，直接在原目录输出）
+
+#### 功能描述
+
+根据前几步的输出（场景文本、角色列表、事实摘要），将文本段落进一步切分，识别每一行是对话还是旁白，并标注说话者，最终生成可用于Roleplay训练的JSONL格式数据集。
+
+#### 处理流程
+
+1. **加载数据**：遍历输入目录，读取场景段落 `*.txt` 文件及其对应的 `{分段文件名}_characters.json`、`{分段文件名}_facts.json` 和整本书的 `characters.json`。
+
+2. **前情提要生成**：
+   - 按段落顺序累加 `_facts.json` 中的 `summary` 字段
+   - 如果累加后的文本超过700字符，调用LLM将其总结为不超过500字符的摘要
+   - 已总结的内容在后续段落中直接使用，不再重新读取原始summary
+
+3. **文本行拆分与对话识别**：
+   - 按换行符拆分为原始行
+   - 使用正则匹配多种引号格式：`""`、`""`、`「」`、`『』`、`（）`
+   - 如果一行包含多段对话或混合内容，按对话边界拆分
+   - 例如：`"ff."abc."gg."` 拆分为 `["\"ff.\"", "abc.", "\"gg.\""]`
+   - 括号 `（）` 包裹的内容视为心理活动，标记为对话
+
+4. **LLM对话标注**：
+   - 每50行作为一个batch（可通过 `--batch-size` 参数调整）
+   - 每行开头添加行号（如 `1: 文本内容`）
+   - Prompt包含：出场角色列表、POV信息、前情提要、带行号的文本行
+   - LLM输出JSON数组，每个元素包含 `is_dialog`（是否是对话）和 `speaker`（说话者本名）
+
+5. **JSONL输出与合并**：
+   - 根据LLM标注结果生成每行的JSON对象
+   - 连续相同speaker的行进行合并：
+     - speaker相同且is_dialog相同则合并
+     - content合并时添加换行符
+     - speaker均为空视为同一speaker
+     - is_dialog不同则不合并
+   - 输出为 `{分段文件名}_dialogue.jsonl` 文件
+
+#### 对话拆分规则
+
+支持的引号格式：
+- 英文双引号：`"..."`
+- 中文双引号：`"..."`
+- 直角引号：`「...」`、`『...』`
+- 中文括号：`（...）`（心理活动，视为对话）
+
+拆分示例：
+- 输入：`"你好"，他说道。"再见"，她回答。`
+- 输出：`["\"你好\"", "，他说道。", "\"再见\"", "，她回答。"]`
+
+#### LLM标注输出格式
+
+```json
+{
+  "annotations": [
+    {
+      "is_dialog": true,
+      "speaker": "角色A"
+    },
+    {
+      "is_dialog": false,
+      "speaker": ""
+    }
+  ]
+}
+```
+
+- `is_dialog`：是否是对话或括号中的心理活动
+- `speaker`：说话者的本名，旁白则为空字符串
+
+#### JSONL输出格式
+
+**输出文件**：`{分段文件名}_dialogue.jsonl`
+
+每行一个JSON对象：
+```json
+{"speaker": "角色A", "is_dialog": true, "content": "你好！"}
+{"speaker": "", "is_dialog": false, "content": "他微笑着说道。"}
+```
+
+#### 合并规则示例
+
+输入（标注后）：
+```
+行1: "你好" → is_dialog=true, speaker="角色A"
+行2: "早上好" → is_dialog=true, speaker="角色A"
+行3: 他走进房间 → is_dialog=false, speaker=""
+行4: 环顾四周 → is_dialog=false, speaker=""
+行5: "有人吗？" → is_dialog=true, speaker="角色A"
+```
+
+输出（合并后）：
+```json
+{"speaker": "角色A", "is_dialog": true, "content": "你好\n早上好"}
+{"speaker": "", "is_dialog": false, "content": "他走进房间\n环顾四周"}
+{"speaker": "角色A", "is_dialog": true, "content": "有人吗？"}
+```
+
+#### 使用方法
+
+```bash
+python src/rp-datapipeline/step1_corpus_segmentation/1_5_dialogue_segmentation.py \
+  --input data/processed/1_1_scene_segmentation/ \
+  --output data/processed/1_1_scene_segmentation/
+```
+
+或使用入口脚本：
+
+```bash
+python -m src.rp-datapipeline.run --step 1_5
+```
+
+可选参数：
+- `--batch-size`：每批处理的行数（默认：50）
+
+---
+
 ## 步骤2：场景上下文提炼
 
 *（占位符，待后续实现时补充）*

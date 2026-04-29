@@ -83,6 +83,17 @@ def _init_step_registry():
         }
     )
 
+    register_step(
+        step_id="1_5",
+        module_name="src.rp-datapipeline.step1_corpus_segmentation.1_5_dialogue_segmentation",
+        description="对话切分与JSONL数据集生成：识别对话和旁白，标注说话者，生成JSONL格式数据集",
+        default_input=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_output=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_params={
+            "batch_size": 50
+        }
+    )
+
 
 _init_step_registry()
 
