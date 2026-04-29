@@ -295,6 +295,66 @@ python -m src.rp-datapipeline.run --step 1_3
 
 ---
 
+### 1.4 世界观设定与角色设定提取
+
+**脚本名称**：`1_4_world_character_profiles.py`
+
+**输入目录**：`data/processed/1_1_scene_segmentation/`
+**输出目录**：`data/processed/1_1_scene_segmentation/`（与输入相同，直接在原目录输出）
+
+#### 功能描述
+
+根据前几步的输出（角色列表、分段角色列表、分段事实），提取每本书的世界观设定和每个主要角色的角色设定。
+
+#### 处理流程
+
+1. **加载数据**：遍历输入目录中的书籍子目录，读取 `characters.json`、所有 `*_characters.json` 和 `*_facts.json` 文件。
+2. **主要角色筛选**：统计每个角色在各分段 `_characters.json` 中的出现次数，过滤掉出现段落数少于阈值（默认3）的角色。
+3. **世界观设定提取**：将所有 `_facts.json` 中的 `summary` 按顺序拼接，发送给LLM提取世界观设定，包括基础简介、特殊概念和专有名词解释、重要地点解释。
+4. **角色设定提取**：遍历每个主要角色，从各 `_facts.json` 中按顺序提取该角色出场段落的环境事实、角色行为事实和典型台词，组装后发送给LLM提取角色设定。
+5. **输出文件**：生成 `world_settings.md` 和每个主要角色的 `{角色本名}.md`。
+
+#### 角色设定包含内容
+
+- 姓名
+- 基础信息：核心身份、视觉印象/年龄
+- 性格内核：关键词、设定、行为习惯、道德基准
+- 语言习惯：语调、口癖、对他人的称谓
+- 人际关系：跟其他主要角色关系
+- 人物弧光：角色的成长，关注特质不要写具体事件
+- 典型台词：选取5个最能表现角色性格和特点的台词
+
+#### 输出格式
+
+LLM直接输出Markdown格式的设定文档，信息点的标题命名和格式会随机变化，不使用固定模板。
+
+**世界观设定文件**：`world_settings.md`
+- 涵盖基础简介、特殊概念/专有名词、重要地点等信息点
+- Markdown格式，标题和组织方式由LLM自由生成
+
+**角色设定文件**：`{角色本名}.md`
+- 涵盖姓名、基础信息、性格内核、语言习惯、人际关系、人物弧光、典型台词（5句）等信息点
+- Markdown格式，标题和组织方式由LLM自由生成
+
+#### 使用方法
+
+```bash
+python src/rp-datapipeline/step1_corpus_segmentation/1_4_world_character_profiles.py \
+  --input data/processed/1_1_scene_segmentation/ \
+  --output data/processed/1_1_scene_segmentation/
+```
+
+或使用入口脚本：
+
+```bash
+python -m src.rp-datapipeline.run --step 1_4
+```
+
+可选参数：
+- `--min-appearances`：主要角色最少出场段落数（默认：3）
+
+---
+
 ## 步骤2：场景上下文提炼
 
 *（占位符，待后续实现时补充）*

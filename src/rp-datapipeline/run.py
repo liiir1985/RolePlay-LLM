@@ -71,6 +71,17 @@ def _init_step_registry():
         default_output=f"{config.processed_data_dir}/1_1_scene_segmentation",
         default_params={}
     )
+    
+    register_step(
+        step_id="1_4",
+        module_name="src.rp-datapipeline.step1_corpus_segmentation.1_4_world_character_profiles",
+        description="世界观设定与角色设定提取：从分段事实中提取世界观和主要角色设定",
+        default_input=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_output=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_params={
+            "min_appearance_pct": 20
+        }
+    )
 
 
 _init_step_registry()
