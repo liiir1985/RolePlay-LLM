@@ -476,9 +476,117 @@ python -m src.rp-datapipeline.run --step 1_5
 
 ---
 
-## 步骤2：场景上下文提炼
+## 步骤2：ChatML训练集生成
 
-*（占位符，待后续实现时补充）*
+### 2.1 JSONL转ChatML训练集
+
+**脚本名称**：`2_1_jsonl_to_chatml.py`
+
+**输入目录**：`data/processed/1_1_scene_segmentation/`
+**输出目录**：`data/processed/2_1_chatml_conversion/`
+
+#### 功能描述
+
+将步骤1_5中产生的JSONL数据集文件进一步加工成ChatML格式的训练集，包含system提示、角色分配、消息合并以及reasoning_content补全，使其可直接用于Roleplay模型训练。
+
+#### 处理流程
+
+1. **JSONL文件收集与随机抽样**：
+   - 遍历输入目录中的所有书籍子目录，收集所有 `*_dialogue.jsonl` 文件
+   - 支持随机抽样功能，通过 `--sample-count` 参数指定抽样数量（默认10）
+   - 当 `sample_count=0` 时，处理所有文件，不进行抽样
+
+2. **关联文件加载**：
+   - 读取对应的 `{stem}_characters.json`，提取出场角色列表、is_pov、pov_name
+   - 读取对应的 `{stem}_facts.json`，提取summary用于前情提要构建
+   - 读取书籍目录下的 `world_settings.md`（世界观设定）
+   - 读取出场角色和POV角色对应的 `{角色本名}.md` 设定文件
+
+3. **用户角色确定**：
+   - 如果 `is_pov` 为 `true` 且 `pov_name` 非空，则用户角色为 `pov_name`
+   - 如果不是第一人称，统计该书籍中所有 `_characters.json` 文件的角色出场频率，选择出场频率最高的角色作为用户角色
+
+4. **ChatML消息转换**：
+   - **4-1 System消息构建**：
+     - 任务描述：使用LLM生成随机指令，大意："你是一个专业的角色扮演专家，请根据给定的世界观和角色设定，进行角色扮演。用户扮演的角色为XXXX，你将扮演除了XXX以外的所有角色，并负责剧情的推进。请以第一/三人称进行书写"
+     - 世界观设定：来自 `world_settings.md` 的内容
+     - 出场角色设定：来自各角色的 `{角色本名}.md` 文件内容
+     - 前情提要：累加之前段落的summary，超过700字符时调用LLM总结为不超过500字符
+   - **4-2 角色分配**：
+     - 如果 `speaker` 等于用户角色，则 `role="user"`
+     - 否则（包括 `speaker` 为空字符串），`role="assistant"`
+   - **4-3 相邻消息合并**：
+     - 连续相同 `role` 的消息合并为一条
+     - `content` 合并时添加换行符
+     - 收集被合并消息中的所有 `speaker`
+   - **4-4 首条消息角色调整**：
+     - 如果system之后第一条消息的 `role` 为 `"assistant"`，则改为 `"user"`
+
+5. **Reasoning Content补全**：
+   - 为每一条 `role="assistant"` 的消息补充 `reasoning_content`
+   - LLM的提示词包含当前message前面所有message的content
+   - 思考顺序：
+     1. **环境状况分析**：核心动机对齐、人设约束检查
+     2. **局势与信息差分析**：对话进展、信息差
+     3. **行动策略制定**：战术选择、语气确定
+     4. **角色第一视角思考**：瞬时情绪反应、未说出口的潜台词、理智与情感的冲突
+   - 输出格式为Markdown，无固定模板
+
+6. **输出保存**：
+   - 将补全了 `reasoning_content` 的ChatML messages保存到2_1的输出目录
+   - 在该书所在子目录里
+
+#### 输出格式
+
+每个处理后的JSONL文件对应一个输出文件，格式为JSON：
+
+```json
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "【任务描述】\n你是一个专业的角色扮演专家...\n\n【世界观设定】\n...\n\n【角色设定】\n...\n\n【前情提要】\n..."
+    },
+    {
+      "role": "user",
+      "content": "你好！"
+    },
+    {
+      "role": "assistant",
+      "content": "你好，有什么可以帮你的吗？",
+      "reasoning_content": "## 环境状况分析\n\n### 核心动机对齐\n根据全局档案，角色的终极目标是...\n\n### 人设约束检查\n这个角色绝对不能...\n\n## 局势与信息差分析\n当前对话进展到...\n\n## 行动策略制定\n为了实现上述目标...\n\n## 角色第一视角思考\n面对刚才发生的事情..."
+    }
+  ]
+}
+```
+
+#### 输出目录结构
+
+```
+data/processed/2_1_chatml_conversion/
+├── novel_name/
+│   ├── novel_name_000_chatml.json
+│   ├── novel_name_001_chatml.json
+│   └── ...
+└── ...
+```
+
+#### 使用方法
+
+```bash
+python src/rp-datapipeline/step2_chatml_conversion/2_1_jsonl_to_chatml.py \
+  --input data/processed/1_1_scene_segmentation/ \
+  --output data/processed/2_1_chatml_conversion/
+```
+
+或使用入口脚本：
+
+```bash
+python -m src.rp-datapipeline.run --step 2_1
+```
+
+可选参数：
+- `--sample-count`：每本书随机抽样处理的JSONL文件数量（默认：10，0表示处理所有）
 
 ---
 

@@ -94,6 +94,17 @@ def _init_step_registry():
         }
     )
 
+    register_step(
+        step_id="2_1",
+        module_name="src.rp-datapipeline.step2_chatml_conversion.2_1_jsonl_to_chatml",
+        description="JSONL转ChatML训练集：将JSONL数据集转换为ChatML格式，包含system提示、角色分配和reasoning_content补全",
+        default_input=f"{config.processed_data_dir}/1_1_scene_segmentation",
+        default_output=f"{config.processed_data_dir}/2_1_chatml_conversion",
+        default_params={
+            "sample_count": 10
+        }
+    )
+
 
 _init_step_registry()
 

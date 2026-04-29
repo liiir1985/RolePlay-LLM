@@ -1,0 +1,29 @@
+# Checklist
+
+- [x] 脚本文件 `2_1_jsonl_to_chatml.py` 存在于 `step2_chatml_conversion/` 目录中
+- [x] JSONL文件收集逻辑正确：遍历书籍子目录，收集所有 `*_dialogue.jsonl` 文件
+- [x] `--sample-count` 参数可正常传入且默认值为10
+- [x] 随机抽样逻辑正确：从收集到的文件中随机抽取指定数量
+- [x] `sample_count=0` 时处理所有文件，不进行抽样
+- [x] 关联文件加载逻辑正确：加载 `_characters.json`、`_facts.json`、`world_settings.md`、角色设定 `.md` 文件
+- [x] 文件缺失时正确处理：跳过并记录警告
+- [x] 用户角色确定逻辑正确：
+  - 第一人称视角使用 `pov_name`
+  - 第三人称视角统计出场频率选择最高的角色
+- [x] 前情提要构建逻辑正确：累加summary，超过700字符时调用LLM总结
+- [x] System消息构建正确：包含任务描述（LLM生成）、世界观设定、角色设定、前情提要
+- [x] 角色分配逻辑正确：
+  - speaker等于用户角色时role为user
+  - 其他情况（包括speaker为空）role为assistant
+- [x] 相邻消息合并逻辑正确：连续相同role的消息合并，收集所有speaker
+- [x] 首条消息调整逻辑正确：system后第一条如果是assistant则改为user
+- [x] Reasoning Content补全逻辑正确：
+  - 为每条assistant消息调用LLM生成
+  - Prompt包含前面所有message的content
+  - 按照spec中定义的思考顺序
+  - 输出格式为Markdown
+- [x] 输出文件格式正确：JSON格式，包含messages数组，每条消息有role、content，assistant消息有reasoning_content
+- [x] 输出目录结构正确：输出到 `{output_dir}/{book_name}/` 子目录
+- [x] `run.py` 中已注册步骤2_1，默认输入为 `1_1_scene_segmentation`，默认输出为 `2_1_chatml_conversion`
+- [x] `README.md` 中已添加步骤2.1完整文档
+- [x] 代码风格与现有步骤（1_1~1_5）保持一致（argparse、LLMClient使用方式、目录遍历逻辑）
