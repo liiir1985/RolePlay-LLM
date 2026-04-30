@@ -126,6 +126,8 @@ class FormalNameResponse(BaseModel):
 class SegmentExtractionResult:
     """单段文本的角色提取结果"""
     characters: List[List[str]]
+    # 每个角色组（对应characters的相同索引）中各个称呼的出现频率
+    character_frequencies: List[Dict[str, int]]
     is_first_person: bool = False
     first_person_name: str = ""
 
@@ -230,11 +232,33 @@ class CharacterExtractor:
     def merge_character_names(
         self,
         existing_characters: List[List[str]],
-        new_characters: List[List[str]]
-    ) -> List[List[str]]:
+        new_characters: List[List[str]],
+        existing_frequencies: Optional[List[Dict[str, int]]] = None,
+        new_frequencies: Optional[List[Dict[str, int]]] = None,
+        # 用于控制是否执行别名数量剪枝。为了避免新称呼立刻被淘汰，改为在外部累计连续N个segment都超过阈值后再传true
+        enable_pruning: bool = False,
+        # 指定哪些索引的角色需要被剪枝。如果为空且 enable_pruning 为 True，则默认检查所有角色
+        prune_indices: Optional[Set[int]] = None
+    ) -> Tuple[List[List[str]], List[Dict[str, int]]]:
         merged = [list(char) for char in existing_characters]
         
-        for new_char in new_characters:
+        # 初始化频率字典，如果没传则给空的字典列表
+        merged_freqs = []
+        if existing_frequencies:
+            merged_freqs = [{k: v for k, v in freq.items()} for freq in existing_frequencies]
+        else:
+            merged_freqs = [{} for _ in existing_characters]
+            
+        new_freqs_list = []
+        if new_frequencies:
+            new_freqs_list = new_frequencies
+        else:
+            new_freqs_list = [{} for _ in new_characters]
+        
+        # 记录现有的合并映射，以便外部跟踪剪枝索引
+        # 注意：此处发生合并时，如果涉及到 prune_indices，则在二次合并后 prune_indices 也要更新
+        
+        for new_char, new_freq in zip(new_characters, new_freqs_list):
             if not new_char:
                 continue
             
@@ -246,32 +270,66 @@ class CharacterExtractor:
             if not deduplicated_new:
                 continue
             
-            found = False
-            for i, existing_char in enumerate(merged):
-                if self._has_name_overlap(existing_char, deduplicated_new):
-                    all_names = existing_char + deduplicated_new
-                    merged[i] = self.deduplicate_names(all_names)
-                    found = True
-                    break
+            # 为了防止把原本不相关的两组人错误合并，我们寻找匹配的最佳项，但不跨组合并
+            best_match_idx = -1
+            max_overlap = 0
             
-            if not found:
+            for i, existing_char in enumerate(merged):
+                overlap_count = 0
+                for a in existing_char:
+                    for b in deduplicated_new:
+                        if a == b or (len(a) >= 2 and len(b) >= 2 and (a in b or b in a)):
+                            overlap_count += 1
+                
+                if overlap_count > max_overlap:
+                    max_overlap = overlap_count
+                    best_match_idx = i
+            
+            if best_match_idx != -1:
+                # 找到了最佳匹配组，只合并到这个组中
+                all_names = merged[best_match_idx] + deduplicated_new
+                merged[best_match_idx] = self.deduplicate_names(all_names)
+                
+                # 合并频率
+                for name in deduplicated_new:
+                    merged_freqs[best_match_idx][name] = merged_freqs[best_match_idx].get(name, 0) + new_freq.get(name, 1)
+            else:
+                # 没有找到匹配的组，作为新角色添加
                 merged.append(deduplicated_new)
+                freq_dict = {}
+                for name in deduplicated_new:
+                    freq_dict[name] = new_freq.get(name, 1)
+                merged_freqs.append(freq_dict)
         
-        # 二次合并：检查merged内部是否有因新增名称产生的跨组包含关系
-        changed = True
-        while changed:
-            changed = False
-            for i in range(len(merged)):
-                for j in range(i + 1, len(merged)):
-                    if self._has_name_overlap(merged[i], merged[j]):
-                        merged[i] = self.deduplicate_names(merged[i] + merged[j])
-                        merged.pop(j)
-                        changed = True
-                        break
-                if changed:
-                    break
+        # 处理别名数量限制
+        if enable_pruning:
+            for i, char_group in enumerate(merged):
+                if len(char_group) > 6:
+                    if prune_indices is not None and i not in prune_indices:
+                        continue
+                        
+                    freq_dict = merged_freqs[i]
+                    
+                    # 计算排名
+                    # 频率排名 (从大到小, 名次越小说明频率越高)
+                    freq_sorted = sorted(char_group, key=lambda x: freq_dict.get(x, 0), reverse=True)
+                    freq_rank = {name: rank for rank, name in enumerate(freq_sorted)}
+                    
+                    # 长度排名 (从大到小, 名次越小说明长度越长)
+                    len_sorted = sorted(char_group, key=len, reverse=True)
+                    len_rank = {name: rank for rank, name in enumerate(len_sorted)}
+                    
+                    # 计算总排名分数：频率排名 + 长度排名。 分数越小越需要保留
+                    score = {name: freq_rank[name] + len_rank[name] for name in char_group}
+                    
+                    # 按照分数从小到大排序，保留前 6 个
+                    kept_names = sorted(char_group, key=lambda x: score[x])[:6]
+                    
+                    # 更新当前组和频率字典
+                    merged[i] = kept_names
+                    merged_freqs[i] = {k: v for k, v in freq_dict.items() if k in kept_names}
         
-        return merged
+        return merged, merged_freqs
     
     def extract_characters_from_segment(
         self,
@@ -305,8 +363,10 @@ class CharacterExtractor:
 
         # 为了避免 chunk 提取出来的角色有遗漏，我们逐步合并到 known_characters 中
         current_known = []
+        current_freqs = []
         if known_characters:
             current_known = [list(char) for char in known_characters]
+            current_freqs = [{} for _ in known_characters]
 
         for chunk_idx, chunk_text in enumerate(chunks):
             known_names_str = ""
@@ -342,28 +402,36 @@ class CharacterExtractor:
                         first_person_name_final = response.first_person_name.strip()
                         
                     result = []
+                    result_freqs = []
                     for item in response.characters:
                         if isinstance(item, list):
                             filtered = self.filter_invalid_names(item)
                             if filtered:
                                 deduplicated = self.deduplicate_names(filtered)
                                 result.append(deduplicated)
+                                result_freqs.append({name: 1 for name in deduplicated})
                     
                     if result:
                         # 汇总当前 chunk 的结果，并将其加入到当前 known_characters 供后续 chunk 参考
                         all_chunk_characters.extend(result)
-                        current_known = self.merge_character_names(current_known, result)
+                        current_known, current_freqs = self.merge_character_names(
+                            current_known, result, current_freqs, result_freqs
+                        )
 
             except Exception as e:
                 print(f"  LLM角色提取失败(Chunk {chunk_idx+1}/{len(chunks)}): {e}")
 
         # 最后将所有 chunk 提取到的角色统一合并一次
         final_characters = []
+        final_frequencies = []
         if all_chunk_characters:
-            final_characters = self.merge_character_names([], all_chunk_characters)
+            # 对于最终合并，将每一个都视为新出现的一次
+            all_chunk_freqs = [{name: 1 for name in char_group} for char_group in all_chunk_characters]
+            final_characters, final_frequencies = self.merge_character_names([], all_chunk_characters, [], all_chunk_freqs)
 
         return SegmentExtractionResult(
             characters=final_characters,
+            character_frequencies=final_frequencies,
             is_first_person=is_first_person_any,
             first_person_name=first_person_name_final
         )
@@ -476,6 +544,9 @@ def process_book_directory(
     # segment_cache 存储每段的提取结果（包含POV信息）
     segment_cache: Dict[str, SegmentExtractionResult] = {}
     all_characters: List[List[str]] = []
+    all_frequencies: List[Dict[str, int]] = []
+    # 记录每个角色组连续称呼超过6个的 segment 计数，结构：{特征键(tuple) : 连续次数}
+    consecutive_over_limit_counts: Dict[tuple, int] = {}
     existing_formal_map: Dict[tuple, Dict] = {}
     
     # 尝试加载已有的 characters.json 以维持上下文，避免增量处理时丢失旧数据
@@ -489,6 +560,18 @@ def process_book_directory(
                     # 按照之前保存的逻辑重构 known_characters
                     char_group = [item["name"]] + item.get("alias", [])
                     all_characters.append(char_group)
+                    
+                    # 恢复频率字典（如果有保存）
+                    freqs = item.get("frequencies", {})
+                    if not freqs:
+                        # 如果没有保存过频率，默认都给 1
+                        freqs = {name: 1 for name in char_group}
+                    all_frequencies.append(freqs)
+                    
+                    # 恢复连续计数（如果有保存）
+                    consecutive_count = item.get("consecutive_over_limit", 0)
+                    consecutive_over_limit_counts[tuple(sorted(char_group))] = consecutive_count
+                    
                     existing_formal_map[tuple(sorted(char_group))] = item
             print(f"  已加载现有角色列表: {len(all_characters)} 个角色")
         except Exception as e:
@@ -527,7 +610,66 @@ def process_book_directory(
         segment_cache[segment_file.stem] = extraction_result
         
         if extraction_result.characters:
-            all_characters = extractor.merge_character_names(all_characters, extraction_result.characters)
+            # 第一步，仅做合并，但不执行剪枝，拿到最新的称呼列表
+            all_characters, all_frequencies = extractor.merge_character_names(
+                all_characters,
+                extraction_result.characters,
+                all_frequencies,
+                extraction_result.character_frequencies,
+                enable_pruning=False
+            )
+            
+            # 第二步，检查当前合并后的每个角色称呼数量
+            # 记录需要被剪枝的角色的索引
+            prune_indices = set()
+            new_consecutive_counts = {}
+            
+            for idx, char_group in enumerate(all_characters):
+                group_key = tuple(sorted(char_group))
+                # 检查旧的计次记录中是否有包含关系
+                prev_count = 0
+                # 由于 char_group 可能在本次合并中增加了新名字，特征键会变，所以需要遍历找子集或者直接根据前一次记录查找
+                # 但因为 all_characters 是动态更新的，最准确的是维护一个映射或通过遍历匹配
+                for old_key, count in consecutive_over_limit_counts.items():
+                    # 只要旧集合是新集合的子集（或者有交集），说明是同一个角色进化来的
+                    if set(old_key).intersection(set(char_group)):
+                        prev_count = max(prev_count, count)
+                
+                if len(char_group) > 6:
+                    current_count = prev_count + 1
+                    if current_count >= 5:
+                        # 连续5个segment超标，触发剪枝
+                        prune_indices.add(idx)
+                        current_count = 0 # 剪枝后重置
+                    new_consecutive_counts[group_key] = current_count
+                else:
+                    new_consecutive_counts[group_key] = 0
+            
+            # 更新字典
+            consecutive_over_limit_counts = new_consecutive_counts
+            
+            # 第三步，如果存在需要剪枝的角色，则再调用一次剪枝（传入空的新增列表，仅为了触发内部的 prune 逻辑）
+            if prune_indices:
+                all_characters, all_frequencies = extractor.merge_character_names(
+                    all_characters,
+                    [],
+                    all_frequencies,
+                    [],
+                    enable_pruning=True,
+                    prune_indices=prune_indices
+                )
+                
+                # 剪枝后名称变了，需要更新 consecutive_over_limit_counts 中的键
+                final_counts = {}
+                for idx, char_group in enumerate(all_characters):
+                    group_key = tuple(sorted(char_group))
+                    # 尝试从之前的 new_consecutive_counts 恢复
+                    count = 0
+                    for old_key, old_count in consecutive_over_limit_counts.items():
+                        if set(old_key).intersection(set(char_group)):
+                            count = max(count, old_count)
+                    final_counts[group_key] = count
+                consecutive_over_limit_counts = final_counts
         
         # POV 处理
         if extraction_result.is_first_person:
@@ -561,15 +703,20 @@ def process_book_directory(
     formal_characters = []
     name_to_formal: Dict[str, str] = {}
     
-    for char_names in all_characters:
+    for i, char_names in enumerate(all_characters):
         if not char_names:
             continue
         
         cache_key = tuple(sorted(char_names))
         if cache_key in existing_formal_map:
             formal_info = existing_formal_map[cache_key]
+            # 始终使用最新的频率数据
+            formal_info["frequencies"] = all_frequencies[i]
+            formal_info["consecutive_over_limit"] = consecutive_over_limit_counts.get(cache_key, 0)
         else:
             formal_info = extractor.identify_formal_name(char_names)
+            formal_info["frequencies"] = all_frequencies[i]
+            formal_info["consecutive_over_limit"] = consecutive_over_limit_counts.get(cache_key, 0)
             
         formal_characters.append(formal_info)
         
