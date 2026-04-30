@@ -458,7 +458,7 @@ def process_book_directory(
     processed_count = 0
 
     for stem in segment_stems:
-        output_file = book_output_dir / f"{stem}_dialogue.jsonl"
+        output_file = book_output_dir / f"{stem}_dialogue.json"
         if output_file.exists():
             print(f"  跳过已处理片段: {stem}")
             continue
@@ -521,10 +521,13 @@ def process_book_directory(
             # 合并连续相同speaker的行
             merged_records = merge_annotated_lines(split_lines, annotations)
 
-            # 输出JSONL
+            # 输出JSON
+            output_data = {
+                "context_summary": context_summary,
+                "messages": merged_records
+            }
             with open(output_file, 'w', encoding='utf-8') as f:
-                for record in merged_records:
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                json.dump(output_data, f, ensure_ascii=False, indent=2)
 
             processed_count += 1
             print(f"    成功生成: {output_file.name} ({len(merged_records)} 条记录)")
@@ -537,7 +540,7 @@ def process_book_directory(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='对话切分与JSONL数据集生成')
+    parser = argparse.ArgumentParser(description='对话切分与JSON数据集生成')
     parser.add_argument(
         '--input', '-i',
         required=True,

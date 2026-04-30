@@ -355,7 +355,7 @@ python -m src.rp-datapipeline.run --step 1_4
 
 ---
 
-### 1.5 对话切分与JSONL数据集生成
+### 1.5 对话切分与JSON数据集生成
 
 **脚本名称**：`1_5_dialogue_segmentation.py`
 
@@ -364,7 +364,7 @@ python -m src.rp-datapipeline.run --step 1_4
 
 #### 功能描述
 
-根据前几步的输出（场景文本、角色列表、事实摘要），将文本段落进一步切分，识别每一行是对话还是旁白，并标注说话者，最终生成可用于Roleplay训练的JSONL格式数据集。
+根据前几步的输出（场景文本、角色列表、事实摘要），将文本段落进一步切分，识别每一行是对话还是旁白，并标注说话者，最终生成可用于Roleplay训练的JSON格式数据集，包含前情提要和对话列表。
 
 #### 处理流程
 
@@ -388,14 +388,15 @@ python -m src.rp-datapipeline.run --step 1_4
    - Prompt包含：出场角色列表、POV信息、前情提要、带行号的文本行
    - LLM输出JSON数组，每个元素包含 `is_dialog`（是否是对话）和 `speaker`（说话者本名）
 
-5. **JSONL输出与合并**：
+5. **JSON输出与合并**：
    - 根据LLM标注结果生成每行的JSON对象
    - 连续相同speaker的行进行合并：
      - speaker相同且is_dialog相同则合并
      - content合并时添加换行符
      - speaker均为空视为同一speaker
      - is_dialog不同则不合并
-   - 输出为 `{分段文件名}_dialogue.jsonl` 文件
+   - 组合前情提要和合并后的消息
+   - 输出为 `{分段文件名}_dialogue.json` 文件
 
 #### 对话拆分规则
 

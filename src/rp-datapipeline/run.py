@@ -86,7 +86,7 @@ def _init_step_registry():
     register_step(
         step_id="1_5",
         module_name="src.rp-datapipeline.step1_corpus_segmentation.1_5_dialogue_segmentation",
-        description="对话切分与JSONL数据集生成：识别对话和旁白，标注说话者，生成JSONL格式数据集",
+        description="对话切分与JSON数据集生成：识别对话和旁白，标注说话者，生成JSON格式数据集",
         default_input=f"{config.processed_data_dir}/1_1_scene_segmentation",
         default_output=f"{config.processed_data_dir}/1_1_scene_segmentation",
         default_params={
@@ -97,7 +97,7 @@ def _init_step_registry():
     register_step(
         step_id="2_1",
         module_name="src.rp-datapipeline.step2_chatml_conversion.2_1_jsonl_to_chatml",
-        description="JSONL转ChatML训练集：将JSONL数据集转换为ChatML格式，包含system提示、角色分配和reasoning_content补全",
+        description="JSON转ChatML训练集：将JSON数据集转换为ChatML格式，包含system提示、角色分配和reasoning_content补全",
         default_input=f"{config.processed_data_dir}/1_1_scene_segmentation",
         default_output=f"{config.processed_data_dir}/2_1_chatml_conversion",
         default_params={

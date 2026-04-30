@@ -280,21 +280,21 @@ class ChatMLConverter:
 
 # ── Helper Functions ──
 
-def collect_jsonl_files(input_dir: Path) -> List[Tuple[Path, str]]:
-    """收集所有 *_dialogue.jsonl 文件，返回 (文件路径, 书籍目录名) 列表。"""
-    jsonl_files = []
+def collect_json_files(input_dir: Path) -> List[Tuple[Path, str]]:
+    """收集所有 *_dialogue.json 文件，返回 (文件路径, 书籍目录名) 列表。"""
+    json_files = []
     
     for item in sorted(input_dir.iterdir()):
         if item.is_dir():
             book_name = item.name
-            for jsonl_file in sorted(item.glob("*_dialogue.jsonl")):
-                jsonl_files.append((jsonl_file, book_name))
+            for json_file in sorted(item.glob("*_dialogue.json")):
+                json_files.append((json_file, book_name))
     
-    if list(input_dir.glob("*_dialogue.jsonl")):
-        for jsonl_file in sorted(input_dir.glob("*_dialogue.jsonl")):
-            jsonl_files.append((jsonl_file, ""))
+    if list(input_dir.glob("*_dialogue.json")):
+        for json_file in sorted(input_dir.glob("*_dialogue.json")):
+            json_files.append((json_file, ""))
     
-    return jsonl_files
+    return json_files
 
 
 def sample_files(files: List[Tuple[Path, str]], sample_count: int) -> List[Tuple[Path, str]]:
@@ -306,11 +306,11 @@ def sample_files(files: List[Tuple[Path, str]], sample_count: int) -> List[Tuple
     return files[:sample_count]
 
 
-def get_stem_from_jsonl(jsonl_path: Path) -> str:
-    """从 *_dialogue.jsonl 路径中提取 stem（去掉 _dialogue.jsonl 后缀）。"""
-    name = jsonl_path.name
-    if name.endswith("_dialogue.jsonl"):
-        return name[:-15]
+def get_stem_from_json(json_path: Path) -> str:
+    """从 *_dialogue.json 路径中提取 stem（去掉 _dialogue.json 后缀）。"""
+    name = json_path.name
+    if name.endswith("_dialogue.json"):
+        return name[:-14]
     return name
 
 
@@ -396,18 +396,15 @@ def get_most_frequent_character(appearance_count: Dict[str, int]) -> Optional[st
     return sorted_chars[0][0]
 
 
-def load_jsonl_records(jsonl_path: Path) -> List[Dict[str, Any]]:
-    """加载JSONL文件中的所有记录。"""
-    records = []
+def load_dialogue_json(json_path: Path) -> Tuple[str, List[Dict[str, Any]]]:
+    """加载JSON文件中的context_summary和messages。"""
     try:
-        with open(jsonl_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    records.append(json.loads(line))
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get("context_summary", ""), data.get("messages", [])
     except Exception as e:
-        print(f"  读取 {jsonl_path.name} 失败: {e}")
-    return records
+        print(f"  读取 {json_path.name} 失败: {e}")
+        return "", []
 
 
 def convert_to_chatml_messages(
@@ -720,45 +717,11 @@ def convert_to_strict_paraphrase_mode(
     return result
 
 
-def build_context_summary(
-    book_dir: Path,
-    target_stem: str,
-    converter: ChatMLConverter
-) -> str:
-    """构建前情提要（累加目标段落之前所有段落的summary）。"""
-    all_facts_files = sorted(book_dir.glob("*_facts.json"))
-    all_summaries = []
-    target_index = -1
-    
-    for i, facts_file in enumerate(all_facts_files):
-        stem = facts_file.stem[:-6] if facts_file.stem.endswith("_facts") else facts_file.stem
-        if stem == target_stem:
-            target_index = i
-            break
-        
-        try:
-            with open(facts_file, 'r', encoding='utf-8') as f:
-                facts_data = json.load(f)
-            summary = facts_data.get("summary", "")
-            if summary:
-                all_summaries.append(summary)
-        except Exception:
-            continue
-    
-    if not all_summaries:
-        return ""
-    
-    accumulated_text = "\n".join(all_summaries)
-    
-    if len(accumulated_text) > 700:
-        print(f"  前情提要超过700字符，调用LLM总结...")
-        return converter.summarize_context(accumulated_text, 500)
-    
-    return accumulated_text
 
 
-def process_jsonl_file(
-    jsonl_path: Path,
+
+def process_json_file(
+    json_path: Path,
     book_dir: Path,
     book_name: str,
     output_dir: Path,
@@ -766,10 +729,10 @@ def process_jsonl_file(
     mode: str = "normal",
     min_chars: int = 500
 ) -> bool:
-    """处理单个JSONL文件。
+    """处理单个JSON文件。
     
     Args:
-        jsonl_path: JSONL文件路径
+        json_path: JSON文件路径
         book_dir: 书籍目录路径
         book_name: 书籍名称
         output_dir: 输出目录
@@ -780,8 +743,8 @@ def process_jsonl_file(
     Returns:
         是否处理是否成功
     """
-    stem = get_stem_from_jsonl(jsonl_path)
-    print(f"\n  处理文件: {jsonl_path.name} (模式: {mode})")
+    stem = get_stem_from_json(json_path)
+    print(f"\n  处理文件: {json_path.name} (模式: {mode})")
     
     char_info = load_characters_info(book_dir, stem)
     if char_info is None:
@@ -822,7 +785,10 @@ def process_jsonl_file(
     
     character_profiles = load_character_profiles(book_dir, list(all_characters))
     
-    context_summary = build_context_summary(book_dir, stem, converter)
+    context_summary, json_records = load_dialogue_json(json_path)
+    if not json_records:
+        print(f"    跳过：JSON文件为空")
+        return False
     
     task_description = converter.generate_task_description(user_role, is_first_person, mode, min_chars)
     
@@ -849,12 +815,7 @@ def process_jsonl_file(
     
     system_content = "\n".join(system_content_parts)
     
-    jsonl_records = load_jsonl_records(jsonl_path)
-    if not jsonl_records:
-        print(f"    跳过：JSONL文件为空")
-        return False
-    
-    chatml_messages = convert_to_chatml_messages(jsonl_records, user_role)
+    chatml_messages = convert_to_chatml_messages(json_records, user_role)
     
     merged_messages = merge_adjacent_messages(chatml_messages)
     
@@ -934,7 +895,7 @@ def process_book_directory(
     mode: str = "normal",
     min_chars: int = 500
 ) -> int:
-    """处理书籍目录中的JSONL文件。
+    """处理书籍目录中的JSON文件。
     
     Args:
         book_dir: 书籍目录路径
@@ -950,32 +911,32 @@ def process_book_directory(
     """
     print(f"\n处理书籍目录: {book_dir.name if book_name else '根目录'} (模式: {mode})")
     
-    jsonl_files = list(book_dir.glob("*_dialogue.jsonl"))
-    if not jsonl_files:
-        print(f"  未找到JSONL文件，跳过")
+    json_files = list(book_dir.glob("*_dialogue.json"))
+    if not json_files:
+        print(f"  未找到JSON文件，跳过")
         return 0
     
-    files_with_book = [(f, book_name) for f in jsonl_files]
+    files_with_book = [(f, book_name) for f in json_files]
     sampled_files = sample_files(files_with_book, sample_count)
     
-    print(f"  共 {len(jsonl_files)} 个JSONL文件，抽样处理 {len(sampled_files)} 个")
+    print(f"  共 {len(json_files)} 个JSON文件，抽样处理 {len(sampled_files)} 个")
     
     processed_count = 0
-    for jsonl_path, bn in sampled_files:
+    for json_path, bn in sampled_files:
         try:
-            if process_jsonl_file(
-                jsonl_path, book_dir, bn or book_name, output_dir, converter, mode, min_chars
+            if process_json_file(
+                json_path, book_dir, bn or book_name, output_dir, converter, mode, min_chars
             ):
                 processed_count += 1
         except Exception as e:
-            print(f"  处理 {jsonl_path.name} 时出错: {e}")
+            print(f"  处理 {json_path.name} 时出错: {e}")
             traceback.print_exc()
     
     return processed_count
 
 
 def main():
-    parser = argparse.ArgumentParser(description='JSONL转ChatML训练集')
+    parser = argparse.ArgumentParser(description='JSON转ChatML训练集')
     parser.add_argument(
         '--input', '-i',
         required=True,
@@ -990,7 +951,7 @@ def main():
         '--sample-count',
         type=int,
         default=10,
-        help='每本书随机抽样处理的JSONL文件数量（默认：10，0表示处理所有）'
+        help='每本书随机抽样处理的JSON文件数量（默认：10，0表示处理所有）'
     )
     parser.add_argument(
         '--mode',
@@ -1035,8 +996,8 @@ def main():
                 print(f"处理目录 {item.name} 时出错: {e}")
                 traceback.print_exc()
 
-    if list(input_dir.glob("*_dialogue.jsonl")):
-        print(f"\n在 {input_dir.name} 根目录下发现JSONL文件")
+    if list(input_dir.glob("*_dialogue.json")):
+        print(f"\n在 {input_dir.name} 根目录下发现JSON文件")
         try:
             count = process_book_directory(
                 input_dir, "", output_dir, converter, args.sample_count, args.mode, args.min_chars
