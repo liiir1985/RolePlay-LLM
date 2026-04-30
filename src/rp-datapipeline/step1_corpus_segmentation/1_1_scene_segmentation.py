@@ -50,11 +50,11 @@ class LLMBasedSceneSegmenter:
         self,
         chunk_size: int = 2000,
         llm_client: Optional[LLMClient] = None,
-        min_scene_chars: int = 100
+        min_segment_chars: int = 2000
     ):
         self.chunk_size = chunk_size
         self.llm_client = llm_client or LLMClient()
-        self.min_scene_chars = min_scene_chars
+        self.min_segment_chars = min_segment_chars
     
     def _split_into_chunks_by_lines(self, lines: List[str]) -> List[List[str]]:
         chunks = []
@@ -183,6 +183,28 @@ class LLMBasedSceneSegmenter:
         sorted_boundaries = sorted(all_boundaries)
         sorted_boundaries = self._merge_adjacent_boundaries(sorted_boundaries)
         
+        # 根据 min_segment_chars 合并过短的片段
+        if self.min_segment_chars > 0:
+            merged_boundaries = [sorted_boundaries[0]]
+            current_start = sorted_boundaries[0]
+            
+            for boundary in sorted_boundaries[1:-1]:
+                segment_lines = lines[current_start - 1:boundary - 1]
+                segment_content = '\n'.join(segment_lines).strip()
+                if len(segment_content) >= self.min_segment_chars:
+                    merged_boundaries.append(boundary)
+                    current_start = boundary
+                    
+            merged_boundaries.append(sorted_boundaries[-1])
+            
+            # 处理最后一段如果过短的情况
+            if len(merged_boundaries) > 2:
+                last_segment_lines = lines[merged_boundaries[-2] - 1:merged_boundaries[-1] - 1]
+                if len('\n'.join(last_segment_lines).strip()) < self.min_segment_chars:
+                    merged_boundaries.pop(-2)
+                    
+            sorted_boundaries = merged_boundaries
+        
         scenes = []
         base_name = Path(source_file).stem
         
@@ -197,7 +219,7 @@ class LLMBasedSceneSegmenter:
             scene_content = '\n'.join(scene_lines)
             stripped_content = scene_content.strip()
             
-            if not stripped_content or len(stripped_content) < self.min_scene_chars:
+            if not stripped_content:
                 continue
             
             scene = {
@@ -264,10 +286,10 @@ def main():
         help='每个chunk的字符数（默认：2000）'
     )
     parser.add_argument(
-        '--min-scene-chars',
+        '--min-segment-chars',
         type=int,
-        default=100,
-        help='最小场景字符数（默认：100）'
+        default=2000,
+        help='合并后的片段最小字符数（默认：2000）'
     )
     
     args = parser.parse_args()
@@ -280,7 +302,7 @@ def main():
     segmenter = LLMBasedSceneSegmenter(
         chunk_size=args.chunk_size,
         llm_client=llm_client,
-        min_scene_chars=args.min_scene_chars
+        min_segment_chars=args.min_segment_chars
     )
     
     if input_path.is_file():

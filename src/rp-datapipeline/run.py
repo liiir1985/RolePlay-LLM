@@ -50,7 +50,7 @@ def _init_step_registry():
         default_output=f"{config.processed_data_dir}/1_1_scene_segmentation",
         default_params={
             "chunk_size": 2000,
-            "min_scene_chars": 100
+            "min_segment_chars": 2000
         }
     )
     

@@ -430,14 +430,19 @@ python -m src.rp-datapipeline.run --step 1_4
 - `is_dialog`：是否是对话或括号中的心理活动
 - `speaker`：说话者的本名，旁白则为空字符串
 
-#### JSONL输出格式
+#### JSON输出格式
 
-**输出文件**：`{分段文件名}_dialogue.jsonl`
+**输出文件**：`{分段文件名}_dialogue.json`
 
-每行一个JSON对象：
 ```json
-{"speaker": "角色A", "is_dialog": true, "content": "你好！"}
-{"speaker": "", "is_dialog": false, "content": "他微笑着说道。"}
+{
+  "context_summary": "角色A决定隐瞒秘密，这导致他与角色B的关系变得紧张。",
+  "messages": [
+    {"speaker": "角色A", "is_dialog": true, "content": "你好\n早上好"},
+    {"speaker": "", "is_dialog": false, "content": "他走进房间\n环顾四周"},
+    {"speaker": "角色A", "is_dialog": true, "content": "有人吗？"}
+  ]
+}
 ```
 
 #### 合并规则示例
@@ -451,11 +456,13 @@ python -m src.rp-datapipeline.run --step 1_4
 行5: "有人吗？" → is_dialog=true, speaker="角色A"
 ```
 
-输出（合并后）：
+输出（合并后包含在前述的 `messages` 数组中）：
 ```json
-{"speaker": "角色A", "is_dialog": true, "content": "你好\n早上好"}
-{"speaker": "", "is_dialog": false, "content": "他走进房间\n环顾四周"}
-{"speaker": "角色A", "is_dialog": true, "content": "有人吗？"}
+[
+  {"speaker": "角色A", "is_dialog": true, "content": "你好\n早上好"},
+  {"speaker": "", "is_dialog": false, "content": "他走进房间\n环顾四周"},
+  {"speaker": "角色A", "is_dialog": true, "content": "有人吗？"}
+]
 ```
 
 #### 使用方法
@@ -479,7 +486,7 @@ python -m src.rp-datapipeline.run --step 1_5
 
 ## 步骤2：ChatML训练集生成
 
-### 2.1 JSONL转ChatML训练集
+### 2.1 JSON转ChatML训练集
 
 **脚本名称**：`2_1_jsonl_to_chatml.py`
 
@@ -488,7 +495,7 @@ python -m src.rp-datapipeline.run --step 1_5
 
 #### 功能描述
 
-将步骤1_5中产生的JSONL数据集文件进一步加工成ChatML格式的训练集，包含system提示、角色分配、消息合并以及reasoning_content补全，使其可直接用于Roleplay模型训练。
+将步骤1_5中产生的JSON数据集文件进一步加工成ChatML格式的训练集，包含system提示、角色分配、消息合并以及reasoning_content补全，使其可直接用于Roleplay模型训练。
 
 支持三种处理模式：
 - **普通模式（normal）**：保持原有行为，用户角色的对话会分散在多个user消息中
@@ -556,8 +563,8 @@ python -m src.rp-datapipeline.run --step 1_5
 
 #### 处理流程
 
-1. **JSONL文件收集与随机抽样**：
-   - 遍历输入目录中的所有书籍子目录，收集所有 `*_dialogue.jsonl` 文件
+1. **JSON文件收集与随机抽样**：
+   - 遍历输入目录中的所有书籍子目录，收集所有 `*_dialogue.json` 文件
    - 支持随机抽样功能，通过 `--sample-count` 参数指定抽样数量（默认10）
    - 当 `sample_count=0` 时，处理所有文件，不进行抽样
 
@@ -609,7 +616,7 @@ python -m src.rp-datapipeline.run --step 1_5
 
 #### 输出格式
 
-每个处理后的JSONL文件对应一个输出文件，格式为JSON：
+每个处理后的JSON文件对应一个输出文件，格式为JSON：
 
 ```json
 {
@@ -657,7 +664,7 @@ python -m src.rp-datapipeline.run --step 2_1
 ```
 
 可选参数：
-- `--sample-count`：每本书随机抽样处理的JSONL文件数量（默认：10，0表示处理所有）
+- `--sample-count`：每本书随机抽样处理的JSON文件数量（默认：10，0表示处理所有）
 - `--mode`：处理模式，可选值为 `normal`、`paraphrase`、`strict-paraphrase`（默认：`normal`）
 - `--min-chars`：每轮最小字符数（仅用于转述模式，默认：500）
 
