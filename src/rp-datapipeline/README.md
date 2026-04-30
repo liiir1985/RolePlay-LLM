@@ -489,6 +489,70 @@ python -m src.rp-datapipeline.run --step 1_5
 
 将步骤1_5中产生的JSONL数据集文件进一步加工成ChatML格式的训练集，包含system提示、角色分配、消息合并以及reasoning_content补全，使其可直接用于Roleplay模型训练。
 
+支持三种处理模式：
+- **普通模式（normal）**：保持原有行为，用户角色的对话会分散在多个user消息中
+- **转述模式（paraphrase）**：用户角色的对话只会出现在一条user消息中，assistant需要生成包含这些对话的完整文本
+- **严格转述模式（strict-paraphrase）**：与转述模式类似，但在任务描述中强调用户角色的发言严格限定在用户提供的内容范围内
+
+#### 处理模式说明
+
+##### 普通模式（normal）
+
+保持原有行为，用户角色的对话会分散在多个user消息中。
+
+**主要特点**：
+- 连续相同role的消息合并为一条
+- 如果system之后第一条消息是assistant，改为user
+- 任务描述为普通角色扮演任务
+
+##### 转述模式（paraphrase）
+
+用户角色的对话只会出现在一条user消息中，assistant需要生成包含这些对话的完整文本。
+
+**主要特点**：
+- **多轮分批处理**：将消息分成多轮处理，每轮满足最小字符数要求
+- **消息收集规则**：
+  - 从指定位置开始向后遍历，累加content的字符数
+  - 当累加字符数达到或超过 `--min-chars` 指定的字数时，检查最后一条消息的role
+  - 如果最后一条消息是assistant，则停止收集
+  - 如果最后一条消息是user，则继续向后遍历，直到找到下一条assistant消息为止
+- **User消息构建**：
+  - 从收集到的消息中筛选出所有role为user的消息
+  - 只选取头1-2条user消息的content（优先选取前2条，如果只有1条则取1条）
+  - 去掉这些content中的引号（包括英文双引号、中文双引号、直角引号等）
+  - 用换行符拼接这些content，作为最终的一条user消息
+- **Assistant消息构建**：
+  - 将收集到的所有消息的完整content（包括带引号的user对话）按顺序拼接
+  - 作为最终的一条assistant消息
+- **任务描述**：
+  - 包含"AI需要生成足够长度的文本内容"
+  - 包含"用户提供的对话内容需要自然地融入到生成的文本中"
+- **不应用首条消息角色调整**：保持消息的原始role分配
+
+##### 严格转述模式（strict-paraphrase）
+
+与转述模式类似，但在任务描述中强调用户角色的发言严格限定在用户提供的内容范围内。
+
+**主要特点**：
+- 与转述模式相同的多轮分批处理逻辑
+- **User消息构建**：
+  - 从收集到的消息中筛选出所有role为user的消息
+  - 去掉所有这些content中的引号，用换行符拼接，作为最终的一条user消息
+- **任务描述**：
+  - 包含转述模式的所有要求
+  - 额外包含"用户角色的发言严格限定在用户提供的内容范围内"
+  - 额外包含"AI不能为用户角色生成用户没有说过的对话"
+- **不应用首条消息角色调整**：保持消息的原始role分配
+
+#### 三种模式对比
+
+| 特性 | normal | paraphrase | strict-paraphrase |
+|------|--------|------------|-------------------|
+| 消息转换 | 合并相邻同role消息，调整首条为user | 多轮分批处理，每轮取头1-2条user | 多轮分批处理，每轮取所有user |
+| `adjust_first_message_role` | 调用 | 不调用 | 不调用 |
+| 任务描述 | 普通模式 | 转述模式（需生成足够长度） | 严格转述模式（用户发言限定） |
+| reasoning_content | 生成 | 生成 | 生成 |
+
 #### 处理流程
 
 1. **JSONL文件收集与随机抽样**：
@@ -508,19 +572,25 @@ python -m src.rp-datapipeline.run --step 1_5
 
 4. **ChatML消息转换**：
    - **4-1 System消息构建**：
-     - 任务描述：使用LLM生成随机指令，大意："你是一个专业的角色扮演专家，请根据给定的世界观和角色设定，进行角色扮演。用户扮演的角色为XXXX，你将扮演除了XXX以外的所有角色，并负责剧情的推进。请以第一/三人称进行书写"
+     - 任务描述：根据模式使用不同的系统提示词
+       - 普通模式："你是一个专业的角色扮演专家，请根据给定的世界观和角色设定，进行角色扮演。用户扮演的角色为XXXX，你将扮演除了XXX以外的所有角色，并负责剧情的推进。请以第一/三人称进行书写"
+       - 转述模式：在普通模式基础上，添加"你需要生成足够长度的文本内容，用户提供的对话内容需要自然地融入到生成的文本中"
+       - 严格转述模式：在转述模式基础上，添加"用户角色的发言严格限定在用户提供的内容范围内，AI不能为用户角色生成用户没有说过的对话"
      - 世界观设定：来自 `world_settings.md` 的内容
      - 出场角色设定：来自各角色的 `{角色本名}.md` 文件内容
      - 前情提要：累加之前段落的summary，超过700字符时调用LLM总结为不超过500字符
    - **4-2 角色分配**：
      - 如果 `speaker` 等于用户角色，则 `role="user"`
      - 否则（包括 `speaker` 为空字符串），`role="assistant"`
-   - **4-3 相邻消息合并**：
+   - **4-3 相邻消息合并**（仅普通模式）：
      - 连续相同 `role` 的消息合并为一条
      - `content` 合并时添加换行符
      - 收集被合并消息中的所有 `speaker`
-   - **4-4 首条消息角色调整**：
+   - **4-4 首条消息角色调整**（仅普通模式）：
      - 如果system之后第一条消息的 `role` 为 `"assistant"`，则改为 `"user"`
+   - **4-5 转述模式/严格转述模式转换**：
+     - 多轮分批处理：循环调用消息收集函数，直到所有消息处理完毕
+     - 每一轮构建一条user消息和一条assistant消息
 
 5. **Reasoning Content补全**：
    - 为每一条 `role="assistant"` 的消息补充 `reasoning_content`
@@ -587,6 +657,35 @@ python -m src.rp-datapipeline.run --step 2_1
 
 可选参数：
 - `--sample-count`：每本书随机抽样处理的JSONL文件数量（默认：10，0表示处理所有）
+- `--mode`：处理模式，可选值为 `normal`、`paraphrase`、`strict-paraphrase`（默认：`normal`）
+- `--min-chars`：每轮最小字符数（仅用于转述模式，默认：500）
+
+#### 使用示例
+
+**普通模式（默认）**：
+```bash
+python -m src.rp-datapipeline.run --step 2_1 -- --mode normal
+```
+
+**转述模式**：
+```bash
+python -m src.rp-datapipeline.run --step 2_1 -- --mode paraphrase --min-chars 500
+```
+
+**严格转述模式**：
+```bash
+python -m src.rp-datapipeline.run --step 2_1 -- --mode strict-paraphrase --min-chars 1000
+```
+
+**直接调用脚本**：
+```bash
+python src/rp-datapipeline/step2_chatml_conversion/2_1_jsonl_to_chatml.py \
+  --input data/processed/1_1_scene_segmentation/ \
+  --output data/processed/2_1_chatml_conversion/ \
+  --mode paraphrase \
+  --min-chars 500 \
+  --sample-count 5
+```
 
 ---
 
