@@ -1,5 +1,6 @@
 import argparse
 import json
+import random
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -241,6 +242,13 @@ def process_file(
     output_dir: Path,
     segmenter: LLMBasedSceneSegmenter
 ) -> int:
+    base_name = input_path.stem
+    file_output_dir = output_dir / base_name
+    
+    if file_output_dir.exists():
+        print(f"输出目录已存在，跳过文件: {input_path.name}")
+        return 0
+
     with open(input_path, 'r', encoding='utf-8') as f:
         content = f.read()
     
@@ -249,10 +257,7 @@ def process_file(
     
     scenes = segmenter.segment(content, input_path.name)
     
-    base_name = input_path.stem
-    
     # 为当前原始文件创建一个子目录
-    file_output_dir = output_dir / base_name
     file_output_dir.mkdir(parents=True, exist_ok=True)
     
     for scene in scenes:
@@ -291,6 +296,12 @@ def main():
         default=2000,
         help='合并后的片段最小字符数（默认：2000）'
     )
+    parser.add_argument(
+        '--sample-files',
+        type=int,
+        default=0,
+        help='随机抽取处理的txt文件数量，0表示全部处理（默认：0）'
+    )
     
     args = parser.parse_args()
     
@@ -309,6 +320,9 @@ def main():
         files = [input_path]
     else:
         files = list(input_path.glob('*.txt'))
+        if args.sample_files > 0 and len(files) > args.sample_files:
+            files = random.sample(files, args.sample_files)
+            print(f"随机抽取了 {args.sample_files} 个文件进行处理")
     
     total_scenes = 0
     processed_files = 0
