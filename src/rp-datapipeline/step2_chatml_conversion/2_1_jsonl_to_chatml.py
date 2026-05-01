@@ -949,7 +949,7 @@ def main():
         '--sample-count',
         type=int,
         default=10,
-        help='每本书随机抽样处理的JSON文件数量（默认：10，0表示处理所有）'
+        help='从所有书籍中随机抽样处理的JSON文件总数量（默认：10，0表示处理所有）'
     )
     parser.add_argument(
         '--mode',
@@ -978,38 +978,49 @@ def main():
     llm_client = LLMClient()
     converter = ChatMLConverter(llm_client=llm_client)
 
-    total_processed = 0
-    books_processed = 0
-
+    # 第一步：收集所有书籍的所有文件
+    all_files = []
     for item in sorted(input_dir.iterdir()):
         if item.is_dir() and item != output_dir:
-            try:
-                count = process_book_directory(
-                    item, item.name, output_dir, converter, args.sample_count, args.mode, args.min_chars
-                )
-                total_processed += count
-                if count > 0:
-                    books_processed += 1
-            except Exception as e:
-                print(f"处理目录 {item.name} 时出错: {e}")
-                traceback.print_exc()
+            json_files = list(item.glob("*_dialogue.json"))
+            files_with_book = [(f, item, item.name) for f in json_files]
+            all_files.extend(files_with_book)
 
-    if list(input_dir.glob("*_dialogue.json")):
-        print(f"\n在 {input_dir.name} 根目录下发现JSON文件")
+    # 检查根目录
+    root_json_files = list(input_dir.glob("*_dialogue.json"))
+    if root_json_files:
+        files_with_book = [(f, input_dir, "") for f in root_json_files]
+        all_files.extend(files_with_book)
+
+    print(f"\n总共发现 {len(all_files)} 个JSON文件")
+
+    # 第二步：全局抽样
+    if args.sample_count > 0 and len(all_files) > args.sample_count:
+        sampled_files = random.sample(all_files, args.sample_count)
+        print(f"随机抽样 {args.sample_count} 个文件进行处理")
+    else:
+        sampled_files = all_files
+        print(f"处理所有 {len(all_files)} 个文件")
+
+    # 第三步：处理抽样后的文件
+    total_processed = 0
+    books_processed = set()
+
+    for json_path, book_dir, book_name in sampled_files:
         try:
-            count = process_book_directory(
-                input_dir, "", output_dir, converter, args.sample_count, args.mode, args.min_chars
-            )
-            total_processed += count
-            if count > 0:
-                books_processed += 1
+            if process_json_file(
+                json_path, book_dir, book_name, output_dir, converter, args.mode, args.min_chars
+            ):
+                total_processed += 1
+                if book_name:
+                    books_processed.add(book_name)
         except Exception as e:
-            print(f"处理根目录时出错: {e}")
+            print(f"处理 {json_path.name} 时出错: {e}")
             traceback.print_exc()
 
     print(f"\n全部处理完成！")
     print(f"  处理模式: {args.mode}")
-    print(f"  处理书籍目录数: {books_processed}")
+    print(f"  涉及书籍目录数: {len(books_processed)}")
     print(f"  成功处理文件数: {total_processed}")
     print(f"  输出目录: {output_dir}")
 
