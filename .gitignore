@@ -153,6 +153,7 @@ cython_debug/
 data/
 outputs/
 models/
+test/
 checkpoint/
 logs/
 /tools/annotation/frontend/node_modules
