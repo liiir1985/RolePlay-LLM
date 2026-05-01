@@ -416,20 +416,18 @@ def convert_to_chatml_messages(
     for record in records:
         speaker = record.get("speaker", "")
         content = record.get("content", "")
-        is_dialog = record.get("is_dialog", False)
-        
+
         if speaker == user_role:
             role = "user"
         else:
             role = "assistant"
-        
+
         messages.append({
             "role": role,
             "content": content,
-            "speaker": speaker,
-            "is_dialog": is_dialog
+            "speaker": speaker
         })
-    
+
     return messages
 
 
