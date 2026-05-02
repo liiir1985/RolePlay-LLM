@@ -6,12 +6,14 @@ import copy
 
 
 def generate_no_reasoning_version(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """生成不带reasoning的版本：直接去掉所有reasoning_content，并在system消息前添加[THINKING:OFF]"""
+    """生成不带reasoning的版本：将所有reasoning_content设为空字符串，并在system消息前添加[THINKING:OFF]"""
     result_messages = []
     for i, msg in enumerate(messages):
         new_msg = copy.deepcopy(msg)
-        if "reasoning_content" in new_msg:
-            del new_msg["reasoning_content"]
+
+        # 如果是assistant消息，确保reasoning_content为空字符串
+        if new_msg.get("role") == "assistant":
+            new_msg["reasoning_content"] = ""
 
         # 如果是第一条system消息，在content前添加[THINKING:OFF]
         if i == 0 and new_msg.get("role") == "system":
@@ -40,7 +42,14 @@ def generate_progressive_reasoning_versions(messages: List[Dict[str, Any]]) -> L
     for target_idx in assistant_indices:
         # 截取到当前assistant消息（包含）
         current_messages = messages[:target_idx + 1]
-        
+
+        # 检查最后一条assistant消息前是否有user消息
+        has_user_before_last_assistant = False
+        for i in range(len(current_messages) - 1):
+            if current_messages[i].get("role") == "user":
+                has_user_before_last_assistant = True
+                break
+
         # 复制消息并处理reasoning_content
         result_messages = []
         for i, msg in enumerate(current_messages):
@@ -52,12 +61,23 @@ def generate_progressive_reasoning_versions(messages: List[Dict[str, Any]]) -> L
 
             # 如果是assistant消息
             if new_msg.get("role") == "assistant":
-                # 只保留最后一条assistant的reasoning_content
-                if i != target_idx and "reasoning_content" in new_msg:
-                    del new_msg["reasoning_content"]
+                if i == target_idx:
+                    # 最后一条assistant：确保有reasoning_content字段
+                    if "reasoning_content" not in new_msg or new_msg["reasoning_content"] is None:
+                        new_msg["reasoning_content"] = ""
+                else:
+                    # 前面的assistant：删除reasoning_content字段
+                    if "reasoning_content" in new_msg:
+                        del new_msg["reasoning_content"]
 
             result_messages.append(new_msg)
-        
+
+        # 如果最后一条assistant前没有user消息，在最后插入一个空的user消息
+        if not has_user_before_last_assistant:
+            # 在最后一条assistant消息前插入空user消息
+            empty_user = {"role": "user", "content": ""}
+            result_messages.insert(-1, empty_user)
+
         versions.append({"messages": result_messages})
     
     return versions
@@ -82,7 +102,13 @@ def process_json_file(json_path: Path, output_dir: Path) -> int:
     if not messages:
         print(f"  跳过：消息列表为空")
         return 0
-    
+
+    # 检查是否包含role=user的消息
+    has_user_message = any(msg.get("role") == "user" for msg in messages)
+    if not has_user_message:
+        print(f"  跳过：没有role=user的消息")
+        return 0
+
     # 生成所有版本
     all_versions = []
     
