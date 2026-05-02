@@ -675,21 +675,47 @@ def process_book_directory(
         if extraction_result.is_first_person:
             if extraction_result.first_person_name:
                 # 当前段识别出了主角名
+                detected_pov = extraction_result.first_person_name
+
                 if not book_pov_name:
                     # 第一次确认主角名，回填之前未识别的段
-                    book_pov_name = extraction_result.first_person_name
+                    book_pov_name = detected_pov
                     backfill_count = len(pending_pov_segments)
                     for pending_stem in pending_pov_segments:
                         segment_cache[pending_stem].first_person_name = book_pov_name
                     pending_pov_segments.clear()
                     print(f"    确认主角名: {book_pov_name}，已回填 {backfill_count} 段")
                 else:
-                    # 已有主角名，使用已确认的（同一本书主角不变）
-                    extraction_result.first_person_name = book_pov_name
+                    # 检查是否发生POV角色变更
+                    # 需要判断detected_pov是否与book_pov_name指向同一角色
+                    is_same_character = False
+
+                    # 在all_characters中查找这两个名字是否属于同一角色组
+                    detected_group = None
+                    book_group = None
+                    for char_group in all_characters:
+                        if detected_pov in char_group:
+                            detected_group = char_group
+                        if book_pov_name in char_group:
+                            book_group = char_group
+
+                    # 如果两个名字在同一个角色组中，说明是同一角色的不同称呼
+                    if detected_group is not None and book_group is not None and detected_group is book_group:
+                        is_same_character = True
+
+                    if is_same_character:
+                        # 同一角色，保持使用已确认的名字
+                        extraction_result.first_person_name = book_pov_name
+                    else:
+                        # POV角色发生变更
+                        print(f"    检测到POV角色变更: {book_pov_name} -> {detected_pov}")
+                        book_pov_name = detected_pov
+                        # 清空待回填列表，因为之前的段可能是另一个POV
+                        pending_pov_segments.clear()
             else:
                 # 第一人称但无法识别主角名
                 if book_pov_name:
-                    # 已有之前确认的主角名，直接使用
+                    # 已有之前确认的主角名，直接继承使用
                     extraction_result.first_person_name = book_pov_name
                 else:
                     # 标记为待回填
