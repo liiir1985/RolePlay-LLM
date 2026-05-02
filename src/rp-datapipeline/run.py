@@ -105,6 +105,15 @@ def _init_step_registry():
         }
     )
 
+    register_step(
+        step_id="2_2",
+        module_name="src.rp-datapipeline.step2_chatml_conversion.2_2_reasoning_split",
+        description="Reasoning内容拆分：将ChatML格式的JSON文件拆分为带/不带reasoning的JSONL训练集",
+        default_input=f"{config.processed_data_dir}/2_1_chatml_conversion",
+        default_output=f"{config.processed_data_dir}/2_2_reasoning_split",
+        default_params={}
+    )
+
 
 _init_step_registry()
 
